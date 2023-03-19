@@ -768,8 +768,8 @@ public:
   // Common helper for getting how wide LHS of shift is.
   static Value *GetWidthMinusOneValue(Value* LHS,Value* RHS);
 
-  // Used for shifting constraints for OpenCL, do mask for powers of 2, URem for
-  // non powers of two.
+  // Used for shifting constraints for OpenCL or for constrain-shift-value flag,
+  // do mask for powers of 2, URem for non powers of two.
   Value *ConstrainShiftValue(Value *LHS, Value *RHS, const Twine &Name);
 
   Value *EmitDiv(const BinOpInfo &Ops);
@@ -3936,7 +3936,7 @@ Value *ScalarExprEmitter::EmitShl(const BinOpInfo &Ops) {
   bool SanitizeBase = SanitizeSignedBase || SanitizeUnsignedBase;
   bool SanitizeExponent = CGF.SanOpts.has(SanitizerKind::ShiftExponent);
   // OpenCL 6.3j: shift values are effectively % word size of LHS.
-  if (CGF.getLangOpts().OpenCL)
+  if (CGF.getLangOpts().OpenCL || CGF.CGM.getCodeGenOpts().ConstrainShiftValue)
     RHS = ConstrainShiftValue(Ops.LHS, RHS, "shl.mask");
   else if ((SanitizeBase || SanitizeExponent) &&
            isa<llvm::IntegerType>(Ops.LHS->getType())) {
@@ -4005,7 +4005,7 @@ Value *ScalarExprEmitter::EmitShr(const BinOpInfo &Ops) {
     RHS = Builder.CreateIntCast(RHS, Ops.LHS->getType(), false, "sh_prom");
 
   // OpenCL 6.3j: shift values are effectively % word size of LHS.
-  if (CGF.getLangOpts().OpenCL)
+  if (CGF.getLangOpts().OpenCL || CGF.CGM.getCodeGenOpts().ConstrainShiftValue)
     RHS = ConstrainShiftValue(Ops.LHS, RHS, "shr.mask");
   else if (CGF.SanOpts.has(SanitizerKind::ShiftExponent) &&
            isa<llvm::IntegerType>(Ops.LHS->getType())) {
