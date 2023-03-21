@@ -1945,8 +1945,8 @@ defm delete_null_pointer_checks : BoolFOption<"delete-null-pointer-checks",
 
 defm constrain_shift_value : BoolFOption<"constrain-shift-value",
   CodeGenOpts<"ConstrainShiftValue">, DefaultFalse,
-  NegFlag<SetTrue, [CC1Option], "Do not treat oversized shift as undefined behavior">,
-  PosFlag<SetFalse, [], "Treat usage of oversized shift as undefined behavior (default)">,
+  PosFlag<SetFalse, [], "Do not treat oversized shift as undefined behavior">,
+  NegFlag<SetTrue, [CC1Option], "Treat usage of oversized shift as undefined behavior (default)">,
   BothFlags<[CoreOption]>>;
 
 def frewrite_map_file_EQ : Joined<["-"], "frewrite-map-file=">,
