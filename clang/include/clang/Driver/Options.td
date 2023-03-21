@@ -1944,7 +1944,7 @@ defm delete_null_pointer_checks : BoolFOption<"delete-null-pointer-checks",
   BothFlags<[CoreOption]>>;
 
 defm constrain_shift_value : BoolFOption<"constrain-shift-value",
-  CodeGenOpts<"ConstrainShiftValue">, DefaultFalse,
+  CodeGenOpts<"NoConstrainShiftValue">, DefaultFalse,
   PosFlag<SetFalse, [], "Do not treat oversized shift as undefined behavior">,
   NegFlag<SetTrue, [CC1Option], "Treat usage of oversized shift as undefined behavior (default)">,
   BothFlags<[CoreOption]>>;
