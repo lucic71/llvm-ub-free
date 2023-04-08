@@ -1683,7 +1683,7 @@ static bool getRangeForType(CodeGenFunction &CGF, QualType Ty,
 llvm::MDNode *CodeGenFunction::getRangeForLoadFromType(QualType Ty) {
   llvm::APInt Min, End;
   if (!getRangeForType(*this, Ty, Min, End, CGM.getCodeGenOpts().StrictEnums,
-                       hasBooleanRepresentation(Ty)))
+                       hasBooleanRepresentation(Ty) && CGM.getCodeGenOpts().ConstrainBoolValue))
     return nullptr;
 
   llvm::MDBuilder MDHelper(getLLVMContext());
