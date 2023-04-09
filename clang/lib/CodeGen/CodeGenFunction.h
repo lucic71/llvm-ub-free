@@ -4767,6 +4767,10 @@ public:
                                    LValueBaseInfo *BaseInfo = nullptr,
                                    TBAAAccessInfo *TBAAInfo = nullptr);
 
+  Address EmitPointerWithAlignmentOne(const Expr *Addr,
+                                   LValueBaseInfo *BaseInfo = nullptr,
+                                   TBAAAccessInfo *TBAAInfo = nullptr);
+
   /// If \p E references a parameter with pass_object_size info or a constant
   /// array size modifier, emit the object size divided by the size of \p EltTy.
   /// Otherwise return null.
