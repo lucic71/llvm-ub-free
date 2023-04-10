@@ -5114,6 +5114,10 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
                    options::OPT_fno_constrain_bool_value, true))
     CmdArgs.push_back("-fconstrain-bool-value");
 
+  if (!Args.hasFlag(options::OPT_fuse_default_alignment,
+                   options::OPT_fno_use_default_alignment, true))
+    CmdArgs.push_back("-fno-use-default-alignment");
+
   // LLVM Code Generator Options.
 
   for (const Arg *A : Args.filtered(options::OPT_frewrite_map_file_EQ)) {

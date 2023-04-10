@@ -1943,6 +1943,12 @@ defm delete_null_pointer_checks : BoolFOption<"delete-null-pointer-checks",
   PosFlag<SetFalse, [], "Treat usage of null pointers as undefined behavior (default)">,
   BothFlags<[CoreOption]>>;
 
+defm use_default_alignment : BoolFOption<"use-default-alignment",
+  CodeGenOpts<"UseDefaultAlignment">, DefaultTrue,
+  NegFlag<SetFalse, [CC1Option], "Align all memory accesses to 1">,
+  PosFlag<SetTrue,  [CC1Option], "Use default alignment">,
+  BothFlags<[CoreOption]>>;
+
 defm constrain_bool_value : BoolFOption<"constrain-bool-value",
   CodeGenOpts<"ConstrainBoolValue">, DefaultFalse,
   NegFlag<SetFalse, [CC1Option], "Do not constrain bool values to {0,1}">,

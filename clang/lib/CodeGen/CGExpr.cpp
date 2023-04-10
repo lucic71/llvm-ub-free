@@ -1079,13 +1079,18 @@ void CodeGenModule::EmitExplicitCastExprType(const ExplicitCastExpr *E,
 
 /// EmitPointerWithAlignment - Given an expression of pointer type, try to
 /// derive a more accurate bound on the alignment of the pointer.
-Address CodeGenFunction::EmitPointerWithAlignmentOne(const Expr *E,
+Address CodeGenFunction::EmitPointerWithAlignment(const Expr *E,
                                                   LValueBaseInfo *BaseInfo,
                                                   TBAAAccessInfo *TBAAInfo) {
-	return EmitPointerWithAlignment(E, BaseInfo, TBAAInfo).withAlignment(CharUnits::One());
+
+	Address R = _EmitPointerWithAlignment(E, BaseInfo, TBAAInfo);
+	if (CGM.getCodeGenOpts().UseDefaultAlignment)
+		return R;
+	else
+		return R.withAlignment(CharUnits::One());
 }
 
-Address CodeGenFunction::EmitPointerWithAlignment(const Expr *E,
+Address CodeGenFunction::_EmitPointerWithAlignment(const Expr *E,
                                                   LValueBaseInfo *BaseInfo,
                                                   TBAAAccessInfo *TBAAInfo) {
   // We allow this with ObjC object pointers because of fragile ABIs.
