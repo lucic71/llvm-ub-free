@@ -4796,10 +4796,6 @@ public:
                                 ArrayRef<MultiVersionResolverOption> Options);
 
 private:
-  Address _EmitPointerWithAlignment(const Expr *Addr,
-                                   LValueBaseInfo *BaseInfo = nullptr,
-                                   TBAAAccessInfo *TBAAInfo = nullptr);
-
   QualType getVarArgType(const Expr *Arg);
 
   void EmitDeclMetadata();

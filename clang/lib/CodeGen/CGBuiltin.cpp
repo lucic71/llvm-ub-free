@@ -3179,6 +3179,8 @@ RValue CodeGenFunction::EmitBuiltinExpr(const GlobalDecl GD, unsigned BuiltinID,
     bool IsVolatile = PtrTy->getPointeeType().isVolatileQualified();
 
     Address Src = EmitPointerWithAlignment(E->getArg(0));
+    if (!CGM.getCodeGenOpts().UseDefaultAlignment)
+       Src = Src.withAlignment(CharUnits::One());
     EmitNonNullArgCheck(RValue::get(Src.getPointer()), E->getArg(0)->getType(),
                         E->getArg(0)->getExprLoc(), FD, 0);
     Value *Result = MB.CreateColumnMajorLoad(
@@ -3193,6 +3195,8 @@ RValue CodeGenFunction::EmitBuiltinExpr(const GlobalDecl GD, unsigned BuiltinID,
     MatrixBuilder MB(Builder);
     Value *Matrix = EmitScalarExpr(E->getArg(0));
     Address Dst = EmitPointerWithAlignment(E->getArg(1));
+    if (!CGM.getCodeGenOpts().UseDefaultAlignment)
+       Dst = Dst.withAlignment(CharUnits::One());
     Value *Stride = EmitScalarExpr(E->getArg(2));
 
     const auto *MatrixTy = E->getArg(0)->getType()->getAs<ConstantMatrixType>();
@@ -3400,6 +3404,8 @@ RValue CodeGenFunction::EmitBuiltinExpr(const GlobalDecl GD, unsigned BuiltinID,
   case Builtin::BIbzero:
   case Builtin::BI__builtin_bzero: {
     Address Dest = EmitPointerWithAlignment(E->getArg(0));
+    if (!CGM.getCodeGenOpts().UseDefaultAlignment)
+       Dest = Dest.withAlignment(CharUnits::One());
     Value *SizeVal = EmitScalarExpr(E->getArg(1));
     EmitNonNullArgCheck(RValue::get(Dest.getPointer()), E->getArg(0)->getType(),
                         E->getArg(0)->getExprLoc(), FD, 0);
@@ -3412,6 +3418,10 @@ RValue CodeGenFunction::EmitBuiltinExpr(const GlobalDecl GD, unsigned BuiltinID,
   case Builtin::BI__builtin_mempcpy: {
     Address Dest = EmitPointerWithAlignment(E->getArg(0));
     Address Src = EmitPointerWithAlignment(E->getArg(1));
+    if (!CGM.getCodeGenOpts().UseDefaultAlignment) {
+       Dest = Dest.withAlignment(CharUnits::One());
+       Src = Src.withAlignment(CharUnits::One());
+    }
     Value *SizeVal = EmitScalarExpr(E->getArg(2));
     EmitNonNullArgCheck(RValue::get(Dest.getPointer()), E->getArg(0)->getType(),
                         E->getArg(0)->getExprLoc(), FD, 0);
@@ -3429,6 +3439,10 @@ RValue CodeGenFunction::EmitBuiltinExpr(const GlobalDecl GD, unsigned BuiltinID,
   case Builtin::BI__builtin_memcpy_inline: {
     Address Dest = EmitPointerWithAlignment(E->getArg(0));
     Address Src = EmitPointerWithAlignment(E->getArg(1));
+    if (!CGM.getCodeGenOpts().UseDefaultAlignment) {
+       Dest = Dest.withAlignment(CharUnits::One());
+       Src = Src.withAlignment(CharUnits::One());
+    }
     uint64_t Size =
         E->getArg(2)->EvaluateKnownConstInt(getContext()).getZExtValue();
     EmitNonNullArgCheck(RValue::get(Dest.getPointer()), E->getArg(0)->getType(),
@@ -3455,6 +3469,10 @@ RValue CodeGenFunction::EmitBuiltinExpr(const GlobalDecl GD, unsigned BuiltinID,
       break;
     Address Dest = EmitPointerWithAlignment(E->getArg(0));
     Address Src = EmitPointerWithAlignment(E->getArg(1));
+    if (!CGM.getCodeGenOpts().UseDefaultAlignment) {
+       Dest = Dest.withAlignment(CharUnits::One());
+       Src = Src.withAlignment(CharUnits::One());
+    }
     Value *SizeVal = llvm::ConstantInt::get(Builder.getContext(), Size);
     Builder.CreateMemCpy(Dest, Src, SizeVal, false);
     return RValue::get(Dest.getPointer());
@@ -3463,6 +3481,10 @@ RValue CodeGenFunction::EmitBuiltinExpr(const GlobalDecl GD, unsigned BuiltinID,
   case Builtin::BI__builtin_objc_memmove_collectable: {
     Address DestAddr = EmitPointerWithAlignment(E->getArg(0));
     Address SrcAddr = EmitPointerWithAlignment(E->getArg(1));
+    if (!CGM.getCodeGenOpts().UseDefaultAlignment) {
+       DestAddr = DestAddr.withAlignment(CharUnits::One());
+       SrcAddr = SrcAddr.withAlignment(CharUnits::One());
+    }
     Value *SizeVal = EmitScalarExpr(E->getArg(2));
     CGM.getObjCRuntime().EmitGCMemmoveCollectable(*this,
                                                   DestAddr, SrcAddr, SizeVal);
@@ -3481,6 +3503,10 @@ RValue CodeGenFunction::EmitBuiltinExpr(const GlobalDecl GD, unsigned BuiltinID,
       break;
     Address Dest = EmitPointerWithAlignment(E->getArg(0));
     Address Src = EmitPointerWithAlignment(E->getArg(1));
+    if (!CGM.getCodeGenOpts().UseDefaultAlignment) {
+       Dest = Dest.withAlignment(CharUnits::One());
+       Src = Src.withAlignment(CharUnits::One());
+    }
     Value *SizeVal = llvm::ConstantInt::get(Builder.getContext(), Size);
     Builder.CreateMemMove(Dest, Src, SizeVal, false);
     return RValue::get(Dest.getPointer());
@@ -3490,6 +3516,10 @@ RValue CodeGenFunction::EmitBuiltinExpr(const GlobalDecl GD, unsigned BuiltinID,
   case Builtin::BI__builtin_memmove: {
     Address Dest = EmitPointerWithAlignment(E->getArg(0));
     Address Src = EmitPointerWithAlignment(E->getArg(1));
+    if (!CGM.getCodeGenOpts().UseDefaultAlignment) {
+       Dest = Dest.withAlignment(CharUnits::One());
+       Src = Src.withAlignment(CharUnits::One());
+    }
     Value *SizeVal = EmitScalarExpr(E->getArg(2));
     EmitNonNullArgCheck(RValue::get(Dest.getPointer()), E->getArg(0)->getType(),
                         E->getArg(0)->getExprLoc(), FD, 0);
@@ -3501,6 +3531,8 @@ RValue CodeGenFunction::EmitBuiltinExpr(const GlobalDecl GD, unsigned BuiltinID,
   case Builtin::BImemset:
   case Builtin::BI__builtin_memset: {
     Address Dest = EmitPointerWithAlignment(E->getArg(0));
+    if (!CGM.getCodeGenOpts().UseDefaultAlignment)
+       Dest = Dest.withAlignment(CharUnits::One());
     Value *ByteVal = Builder.CreateTrunc(EmitScalarExpr(E->getArg(1)),
                                          Builder.getInt8Ty());
     Value *SizeVal = EmitScalarExpr(E->getArg(2));
@@ -3511,6 +3543,8 @@ RValue CodeGenFunction::EmitBuiltinExpr(const GlobalDecl GD, unsigned BuiltinID,
   }
   case Builtin::BI__builtin_memset_inline: {
     Address Dest = EmitPointerWithAlignment(E->getArg(0));
+    if (!CGM.getCodeGenOpts().UseDefaultAlignment)
+       Dest = Dest.withAlignment(CharUnits::One());
     Value *ByteVal =
         Builder.CreateTrunc(EmitScalarExpr(E->getArg(1)), Builder.getInt8Ty());
     uint64_t Size =
@@ -3531,6 +3565,8 @@ RValue CodeGenFunction::EmitBuiltinExpr(const GlobalDecl GD, unsigned BuiltinID,
     if (Size.ugt(DstSize))
       break;
     Address Dest = EmitPointerWithAlignment(E->getArg(0));
+    if (!CGM.getCodeGenOpts().UseDefaultAlignment)
+       Dest = Dest.withAlignment(CharUnits::One());
     Value *ByteVal = Builder.CreateTrunc(EmitScalarExpr(E->getArg(1)),
                                          Builder.getInt8Ty());
     Value *SizeVal = llvm::ConstantInt::get(Builder.getContext(), Size);
