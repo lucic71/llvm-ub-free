@@ -84,6 +84,8 @@ static void initializeAlloca(CodeGenFunction &CGF, AllocaInst *AI, Value *Size,
   }
   if (CGF.CGM.stopAutoInit())
     return;
+  if (!CGF.CGM.getCodeGenOpts().UseDefaultAlignment)
+    AI->setAlignment(llvm::Align(1));
   auto *I = CGF.Builder.CreateMemSet(AI, Byte, Size, AlignmentInBytes);
   I->addAnnotationMetadata("auto-init");
 }

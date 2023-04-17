@@ -4196,6 +4196,10 @@ Address X86_64ABIInfo::EmitVAArg(CodeGenFunction &CGF, Address VAListAddr,
     // register save area.
     if (TyAlign.getQuantity() > 8) {
       Address Tmp = CGF.CreateMemTemp(Ty);
+      if (!CGF.CGM.getCodeGenOpts().UseDefaultAlignment) {
+        Tmp = Tmp.withAlignment(CharUnits::One()); 
+        RegAddr = RegAddr.withAlignment(CharUnits::One()); 
+      }
       CGF.Builder.CreateMemCpy(Tmp, RegAddr, TySize, false);
       RegAddr = Tmp;
     }

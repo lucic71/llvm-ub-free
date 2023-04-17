@@ -1317,8 +1317,10 @@ static llvm::Value *CreateCoercedLoad(Address Src, llvm::Type *Ty,
   Address Tmp =
       CreateTempAllocaForCoercion(CGF, Ty, Src.getAlignment(), Src.getName());
   CGF.Builder.CreateMemCpy(
-      Tmp.getPointer(), Tmp.getAlignment().getAsAlign(), Src.getPointer(),
-      Src.getAlignment().getAsAlign(),
+      Tmp.getPointer(),
+      !CGF.CGM.getCodeGenOpts().UseDefaultAlignment ? llvm::MaybeAlign(1) : Tmp.getAlignment().getAsAlign(),
+      Src.getPointer(),
+      !CGF.CGM.getCodeGenOpts().UseDefaultAlignment ? llvm::MaybeAlign(1) : Src.getAlignment().getAsAlign(),
       llvm::ConstantInt::get(CGF.IntPtrTy, SrcSize.getKnownMinSize()));
   return CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, Tmp);
 }
@@ -1405,8 +1407,10 @@ static void CreateCoercedStore(llvm::Value *Src,
     Address Tmp = CreateTempAllocaForCoercion(CGF, SrcTy, Dst.getAlignment());
     CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, Src, Tmp);
     CGF.Builder.CreateMemCpy(
-        Dst.getPointer(), Dst.getAlignment().getAsAlign(), Tmp.getPointer(),
-        Tmp.getAlignment().getAsAlign(),
+        Dst.getPointer(),
+        !CGF.CGM.getCodeGenOpts().UseDefaultAlignment ? llvm::MaybeAlign(1) : Dst.getAlignment().getAsAlign(),
+        Tmp.getPointer(),
+        !CGF.CGM.getCodeGenOpts().UseDefaultAlignment ? llvm::MaybeAlign(1) : Tmp.getAlignment().getAsAlign(),
         llvm::ConstantInt::get(CGF.IntPtrTy, DstSize.getFixedSize()));
   }
 }
@@ -2778,8 +2782,10 @@ void CodeGenFunction::EmitFunctionProlog(const CGFunctionInfo &FI,
           // copy.
           CharUnits Size = getContext().getTypeSizeInChars(Ty);
           Builder.CreateMemCpy(
-              AlignedTemp.getPointer(), AlignedTemp.getAlignment().getAsAlign(),
-              ParamAddr.getPointer(), ParamAddr.getAlignment().getAsAlign(),
+              AlignedTemp.getPointer(),
+              !CGM.getCodeGenOpts().UseDefaultAlignment ? llvm::MaybeAlign(1) : AlignedTemp.getAlignment().getAsAlign(),
+              ParamAddr.getPointer(),
+              !CGM.getCodeGenOpts().UseDefaultAlignment ? llvm::MaybeAlign(1) : ParamAddr.getAlignment().getAsAlign(),
               llvm::ConstantInt::get(IntPtrTy, Size.getQuantity()));
           V = AlignedTemp;
         }
@@ -2991,6 +2997,10 @@ void CodeGenFunction::EmitFunctionProlog(const CGFunctionInfo &FI,
         }
 
         if (SrcSize > DstSize) {
+          if (!CGM.getCodeGenOpts().UseDefaultAlignment) {
+            Ptr = Ptr.withAlignment(CharUnits::One());
+            AddrToStoreInto = AddrToStoreInto.withAlignment(CharUnits::One());
+          }
           Builder.CreateMemCpy(Ptr, AddrToStoreInto, DstSize);
         }
 
@@ -5046,6 +5056,10 @@ RValue CodeGenFunction::EmitCall(const CGFunctionInfo &CallInfo,
           Address TempAlloca
             = CreateTempAlloca(STy, Src.getAlignment(),
                                Src.getName() + ".coerce");
+          if (!CGM.getCodeGenOpts().UseDefaultAlignment) {
+            TempAlloca = TempAlloca.withAlignment(CharUnits::One());
+            Src = Src.withAlignment(CharUnits::One());
+          }
           Builder.CreateMemCpy(TempAlloca, Src, SrcSize);
           Src = TempAlloca;
         } else {

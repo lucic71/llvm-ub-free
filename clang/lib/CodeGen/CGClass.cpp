@@ -999,6 +999,10 @@ namespace {
     void emitMemcpyIR(Address DestPtr, Address SrcPtr, CharUnits Size) {
       DestPtr = CGF.Builder.CreateElementBitCast(DestPtr, CGF.Int8Ty);
       SrcPtr = CGF.Builder.CreateElementBitCast(SrcPtr, CGF.Int8Ty);
+      if (!CGF.CGM.getCodeGenOpts().UseDefaultAlignment) {
+        DestPtr = DestPtr.withAlignment(CharUnits::One()); 
+        SrcPtr = SrcPtr.withAlignment(CharUnits::One()); 
+      }
       CGF.Builder.CreateMemCpy(DestPtr, SrcPtr, Size.getQuantity());
     }
 

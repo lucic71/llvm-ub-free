@@ -750,6 +750,10 @@ void AggExprEmitter::VisitCastExpr(CastExpr *E) {
     llvm::Value *SizeVal = llvm::ConstantInt::get(
         CGF.SizeTy,
         CGF.getContext().getTypeSizeInChars(E->getType()).getQuantity());
+    if (!CGF.CGM.getCodeGenOpts().UseDefaultAlignment) {
+      DestAddress = DestAddress.withAlignment(CharUnits::One()); 
+      SourceAddress = SourceAddress.withAlignment(CharUnits::One()); 
+    }
     Builder.CreateMemCpy(DestAddress, SourceAddress, SizeVal);
     break;
   }
@@ -1977,7 +1981,7 @@ static void CheckAggExprForMemSetUse(AggValueSlot &Slot, const Expr *E,
 
   Address Loc = Slot.getAddress();
   Loc = CGF.Builder.CreateElementBitCast(Loc, CGF.Int8Ty);
-  CGF.Builder.CreateMemSet(Loc, CGF.Builder.getInt8(0), SizeVal, false);
+  CGF.Builder.CreateMemSet(CGF.CGM.getCodeGenOpts().UseDefaultAlignment ? Loc : Loc.withAlignment(CharUnits::One()), CGF.Builder.getInt8(0), SizeVal, false);
 
   // Tell the AggExprEmitter that the slot is known zero.
   Slot.setZeroed();
@@ -2164,6 +2168,10 @@ void CodeGenFunction::EmitAggregateCopy(LValue Dest, LValue Src, QualType Ty,
     }
   }
 
+  if (!CGM.getCodeGenOpts().UseDefaultAlignment) {
+    DestPtr = DestPtr.withAlignment(CharUnits::One()); 
+    SrcPtr = SrcPtr.withAlignment(CharUnits::One()); 
+  }
   auto Inst = Builder.CreateMemCpy(DestPtr, SrcPtr, SizeVal, isVolatile);
 
   // Determine the metadata to describe the position of any padding in this

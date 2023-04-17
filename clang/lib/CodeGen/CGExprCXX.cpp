@@ -560,10 +560,13 @@ static void EmitNullBaseClassInitialization(CodeGenFunction &CGF,
       CharUnits StoreOffset = Store.first;
       CharUnits StoreSize = Store.second;
       llvm::Value *StoreSizeVal = CGF.CGM.getSize(StoreSize);
-      CGF.Builder.CreateMemCpy(
-          CGF.Builder.CreateConstInBoundsByteGEP(DestPtr, StoreOffset),
-          CGF.Builder.CreateConstInBoundsByteGEP(SrcPtr, StoreOffset),
-          StoreSizeVal);
+      Address Dest = CGF.Builder.CreateConstInBoundsByteGEP(DestPtr, StoreOffset);
+      Address Src = CGF.Builder.CreateConstInBoundsByteGEP(SrcPtr, StoreOffset);
+      if (!CGF.CGM.getCodeGenOpts().UseDefaultAlignment) {
+        Dest = Dest.withAlignment(CharUnits::One()); 
+        Src = Src.withAlignment(CharUnits::One()); 
+      }
+      CGF.Builder.CreateMemCpy(Dest, Src, StoreSizeVal);
     }
 
   // Otherwise, just memset the whole thing to zero.  This is legal
@@ -575,7 +578,9 @@ static void EmitNullBaseClassInitialization(CodeGenFunction &CGF,
       CharUnits StoreSize = Store.second;
       llvm::Value *StoreSizeVal = CGF.CGM.getSize(StoreSize);
       CGF.Builder.CreateMemSet(
-          CGF.Builder.CreateConstInBoundsByteGEP(DestPtr, StoreOffset),
+          CGF.CGM.getCodeGenOpts().UseDefaultAlignment
+          ? CGF.Builder.CreateConstInBoundsByteGEP(DestPtr, StoreOffset)
+          : CGF.Builder.CreateConstInBoundsByteGEP(DestPtr, StoreOffset).withAlignment(CharUnits::One()),
           CGF.Builder.getInt8(0), StoreSizeVal);
     }
   }
@@ -1027,7 +1032,7 @@ void CodeGenFunction::EmitNewArrayInitializer(
     }
 
     // Create the memset.
-    Builder.CreateMemSet(CurPtr, Builder.getInt8(0), RemainingSize, false);
+    Builder.CreateMemSet(CGM.getCodeGenOpts().UseDefaultAlignment ? CurPtr : CurPtr.withAlignment(CharUnits::One()), Builder.getInt8(0), RemainingSize, false);
     return true;
   };
 

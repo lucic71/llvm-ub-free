@@ -365,7 +365,8 @@ bool AtomicInfo::emitMemSetZeroIfNecessary() const {
     return false;
 
   CGF.Builder.CreateMemSet(
-      addr.getPointer(), llvm::ConstantInt::get(CGF.Int8Ty, 0),
+      CGF.CGM.getCodeGenOpts().UseDefaultAlignment ? addr.getPointer() : addr.withAlignment(CharUnits::One()).getPointer(),
+      llvm::ConstantInt::get(CGF.Int8Ty, 0),
       CGF.getContext().toCharUnitsFromBits(AtomicSizeInBits).getQuantity(),
       LVal.getAlignment().getAsAlign());
   return true;
@@ -1477,6 +1478,10 @@ Address AtomicInfo::convertToAtomicIntPointer(Address Addr) const {
   uint64_t SourceSizeInBits = CGF.CGM.getDataLayout().getTypeSizeInBits(Ty);
   if (SourceSizeInBits != AtomicSizeInBits) {
     Address Tmp = CreateTempAlloca();
+    if (!CGF.CGM.getCodeGenOpts().UseDefaultAlignment) {
+      Tmp = Tmp.withAlignment(CharUnits::One());
+      Addr = Addr.withAlignment(CharUnits::One());
+    }
     CGF.Builder.CreateMemCpy(Tmp, Addr,
                              std::min(AtomicSizeInBits, SourceSizeInBits) / 8);
     Addr = Tmp;

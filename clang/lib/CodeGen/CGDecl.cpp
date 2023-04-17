@@ -1192,7 +1192,7 @@ static void emitStoresForConstant(CodeGenModule &CGM, const VarDecl &D,
   // If the initializer is all or mostly the same, codegen with bzero / memset
   // then do a few stores afterward.
   if (shouldUseBZeroPlusStoresToInitialize(constant, ConstantSize)) {
-    auto *I = Builder.CreateMemSet(Loc, llvm::ConstantInt::get(CGM.Int8Ty, 0),
+    auto *I = Builder.CreateMemSet(CGM.getCodeGenOpts().UseDefaultAlignment ? Loc : Loc.withAlignment(CharUnits::One()), llvm::ConstantInt::get(CGM.Int8Ty, 0),
                                    SizeVal, isVolatile);
     if (IsAutoInit)
       I->addAnnotationMetadata("auto-init");
@@ -1218,7 +1218,7 @@ static void emitStoresForConstant(CodeGenModule &CGM, const VarDecl &D,
       Value = AP.getLimitedValue();
     }
     auto *I = Builder.CreateMemSet(
-        Loc, llvm::ConstantInt::get(CGM.Int8Ty, Value), SizeVal, isVolatile);
+        CGM.getCodeGenOpts().UseDefaultAlignment ? Loc : Loc.withAlignment(CharUnits::One()), llvm::ConstantInt::get(CGM.Int8Ty, Value), SizeVal, isVolatile);
     if (IsAutoInit)
       I->addAnnotationMetadata("auto-init");
     return;
@@ -1254,10 +1254,13 @@ static void emitStoresForConstant(CodeGenModule &CGM, const VarDecl &D,
   }
 
   // Copy from a global.
+  Address Src = createUnnamedGlobalForMemcpyFrom(CGM, D, Builder, constant, Loc.getAlignment());
+  if (!CGM.getCodeGenOpts().UseDefaultAlignment) {
+    Loc = Loc.withAlignment(CharUnits::One()); 
+    Src = Src.withAlignment(CharUnits::One()); 
+  }
   auto *I =
-      Builder.CreateMemCpy(Loc,
-                           createUnnamedGlobalForMemcpyFrom(
-                               CGM, D, Builder, constant, Loc.getAlignment()),
+      Builder.CreateMemCpy(Loc, Src,
                            SizeVal, isVolatile);
   if (IsAutoInit)
     I->addAnnotationMetadata("auto-init");
@@ -1759,7 +1762,7 @@ void CodeGenFunction::emitZeroOrPatternForAutoVarInit(QualType type,
       return;
     if (!EltSize.isOne())
       SizeVal = Builder.CreateNUWMul(SizeVal, CGM.getSize(EltSize));
-    auto *I = Builder.CreateMemSet(Loc, llvm::ConstantInt::get(Int8Ty, 0),
+    auto *I = Builder.CreateMemSet(CGM.getCodeGenOpts().UseDefaultAlignment ? Loc : Loc.withAlignment(CharUnits::One()), llvm::ConstantInt::get(Int8Ty, 0),
                                    SizeVal, isVolatile);
     I->addAnnotationMetadata("auto-init");
     break;
