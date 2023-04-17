@@ -533,7 +533,7 @@ void AggExprEmitter::EmitArrayInit(Address DestPtr, llvm::ArrayType *AType,
     // alloca.
     endOfInit = CGF.CreateTempAlloca(begin->getType(), CGF.getPointerAlign(),
                                      "arrayinit.endOfInit");
-    cleanupDominator = Builder.CreateStore(begin, endOfInit);
+    cleanupDominator = Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, begin, endOfInit);
     CGF.pushIrregularPartialArrayCleanup(begin, endOfInit, elementType,
                                          elementAlign,
                                          CGF.getDestroyer(dtorKind));
@@ -563,7 +563,7 @@ void AggExprEmitter::EmitArrayInit(Address DestPtr, llvm::ArrayType *AType,
       // Tell the cleanup that it needs to destroy up to this
       // element.  TODO: some of these stores can be trivially
       // observed to be unnecessary.
-      if (endOfInit.isValid()) Builder.CreateStore(element, endOfInit);
+      if (endOfInit.isValid()) Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, element, endOfInit);
     }
 
     LValue elementLV = CGF.MakeAddrLValue(
@@ -589,7 +589,7 @@ void AggExprEmitter::EmitArrayInit(Address DestPtr, llvm::ArrayType *AType,
     if (NumInitElements) {
       element = Builder.CreateInBoundsGEP(
           llvmElementType, element, one, "arrayinit.start");
-      if (endOfInit.isValid()) Builder.CreateStore(element, endOfInit);
+      if (endOfInit.isValid()) Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, element, endOfInit);
     }
 
     // Compute the end of the array.
@@ -627,7 +627,7 @@ void AggExprEmitter::EmitArrayInit(Address DestPtr, llvm::ArrayType *AType,
         llvmElementType, currentElement, one, "arrayinit.next");
 
     // Tell the EH cleanup that we finished with the last element.
-    if (endOfInit.isValid()) Builder.CreateStore(nextElement, endOfInit);
+    if (endOfInit.isValid()) Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, nextElement, endOfInit);
 
     // Leave the loop if we're done.
     llvm::Value *done = Builder.CreateICmpEQ(nextElement, end,
@@ -1355,7 +1355,7 @@ AggExprEmitter::VisitLambdaExpr(LambdaExpr *E) {
       assert(LV.isSimple());
       if (CGF.needsEHCleanup(DtorKind)) {
         if (!CleanupDominator)
-          CleanupDominator = CGF.Builder.CreateAlignedLoad(
+          CleanupDominator = CGF.Builder.CreateAlignedLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, 
               CGF.Int8Ty,
               llvm::Constant::getNullValue(CGF.Int8PtrTy),
               CharUnits::One()); // placeholder
@@ -1639,7 +1639,7 @@ void AggExprEmitter::VisitInitListExpr(InitListExpr *E) {
   auto addCleanup = [&](const EHScopeStack::stable_iterator &cleanup) {
     cleanups.push_back(cleanup);
     if (!cleanupDominator) // create placeholder once needed
-      cleanupDominator = CGF.Builder.CreateAlignedLoad(
+      cleanupDominator = CGF.Builder.CreateAlignedLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, 
           CGF.Int8Ty, llvm::Constant::getNullValue(CGF.Int8PtrTy),
           CharUnits::One());
   };

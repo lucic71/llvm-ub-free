@@ -298,7 +298,7 @@ void CGObjCRuntime::EmitInitOfCatchParam(CodeGenFunction &CGF,
   case Qualifiers::OCL_None:
   case Qualifiers::OCL_ExplicitNone:
   case Qualifiers::OCL_Autoreleasing:
-    CGF.Builder.CreateStore(exn, paramAddr);
+    CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, exn, paramAddr);
     return;
 
   case Qualifiers::OCL_Weak:

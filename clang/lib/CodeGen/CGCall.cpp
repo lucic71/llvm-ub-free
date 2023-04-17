@@ -1251,7 +1251,7 @@ static llvm::Value *CreateCoercedLoad(Address Src, llvm::Type *Ty,
 
   // If SrcTy and Ty are the same, just do a load.
   if (SrcTy == Ty)
-    return CGF.Builder.CreateLoad(Src);
+    return CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, Src);
 
   llvm::TypeSize DstSize = CGF.CGM.getDataLayout().getTypeAllocSize(Ty);
 
@@ -1267,7 +1267,7 @@ static llvm::Value *CreateCoercedLoad(Address Src, llvm::Type *Ty,
   // extension or truncation to the desired type.
   if ((isa<llvm::IntegerType>(Ty) || isa<llvm::PointerType>(Ty)) &&
       (isa<llvm::IntegerType>(SrcTy) || isa<llvm::PointerType>(SrcTy))) {
-    llvm::Value *Load = CGF.Builder.CreateLoad(Src);
+    llvm::Value *Load = CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, Src);
     return CoerceIntOrPtrToIntOrPtr(Load, Ty, CGF);
   }
 
@@ -1281,7 +1281,7 @@ static llvm::Value *CreateCoercedLoad(Address Src, llvm::Type *Ty,
     // FIXME: Assert that we aren't truncating non-padding bits when have access
     // to that information.
     Src = CGF.Builder.CreateElementBitCast(Src, Ty);
-    return CGF.Builder.CreateLoad(Src);
+    return CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, Src);
   }
 
   // If coercing a fixed vector to a scalable vector for ABI compatibility, and
@@ -1301,7 +1301,7 @@ static llvm::Value *CreateCoercedLoad(Address Src, llvm::Type *Ty,
         NeedsBitcast = true;
       }
       if (ScalableDst->getElementType() == FixedSrc->getElementType()) {
-        auto *Load = CGF.Builder.CreateLoad(Src);
+        auto *Load = CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, Src);
         auto *UndefVec = llvm::UndefValue::get(ScalableDst);
         auto *Zero = llvm::Constant::getNullValue(CGF.CGM.Int64Ty);
         llvm::Value *Result = CGF.Builder.CreateInsertVector(
@@ -1320,7 +1320,7 @@ static llvm::Value *CreateCoercedLoad(Address Src, llvm::Type *Ty,
       Tmp.getPointer(), Tmp.getAlignment().getAsAlign(), Src.getPointer(),
       Src.getAlignment().getAsAlign(),
       llvm::ConstantInt::get(CGF.IntPtrTy, SrcSize.getKnownMinSize()));
-  return CGF.Builder.CreateLoad(Tmp);
+  return CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, Tmp);
 }
 
 // Function to store a first-class aggregate into memory.  We prefer to
@@ -1334,10 +1334,10 @@ void CodeGenFunction::EmitAggregateStore(llvm::Value *Val, Address Dest,
     for (unsigned i = 0, e = STy->getNumElements(); i != e; ++i) {
       Address EltPtr = Builder.CreateStructGEP(Dest, i);
       llvm::Value *Elt = Builder.CreateExtractValue(Val, i);
-      Builder.CreateStore(Elt, EltPtr, DestIsVolatile);
+      Builder.CreateStore(!CGM.getCodeGenOpts().UseDefaultAlignment, Elt, EltPtr, DestIsVolatile);
     }
   } else {
-    Builder.CreateStore(Val, Dest, DestIsVolatile);
+    Builder.CreateStore(!CGM.getCodeGenOpts().UseDefaultAlignment, Val, Dest, DestIsVolatile);
   }
 }
 
@@ -1354,7 +1354,7 @@ static void CreateCoercedStore(llvm::Value *Src,
   llvm::Type *SrcTy = Src->getType();
   llvm::Type *DstTy = Dst.getElementType();
   if (SrcTy == DstTy) {
-    CGF.Builder.CreateStore(Src, Dst, DstIsVolatile);
+    CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, Src, Dst, DstIsVolatile);
     return;
   }
 
@@ -1371,7 +1371,7 @@ static void CreateCoercedStore(llvm::Value *Src,
   if (SrcPtrTy && DstPtrTy &&
       SrcPtrTy->getAddressSpace() != DstPtrTy->getAddressSpace()) {
     Src = CGF.Builder.CreatePointerBitCastOrAddrSpaceCast(Src, DstTy);
-    CGF.Builder.CreateStore(Src, Dst, DstIsVolatile);
+    CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, Src, Dst, DstIsVolatile);
     return;
   }
 
@@ -1380,7 +1380,7 @@ static void CreateCoercedStore(llvm::Value *Src,
   if ((isa<llvm::IntegerType>(SrcTy) || isa<llvm::PointerType>(SrcTy)) &&
       (isa<llvm::IntegerType>(DstTy) || isa<llvm::PointerType>(DstTy))) {
     Src = CoerceIntOrPtrToIntOrPtr(Src, DstTy, CGF);
-    CGF.Builder.CreateStore(Src, Dst, DstIsVolatile);
+    CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, Src, Dst, DstIsVolatile);
     return;
   }
 
@@ -1403,7 +1403,7 @@ static void CreateCoercedStore(llvm::Value *Src,
     // FIXME: Assert that we aren't truncating non-padding bits when have access
     // to that information.
     Address Tmp = CreateTempAllocaForCoercion(CGF, SrcTy, Dst.getAlignment());
-    CGF.Builder.CreateStore(Src, Tmp);
+    CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, Src, Tmp);
     CGF.Builder.CreateMemCpy(
         Dst.getPointer(), Dst.getAlignment().getAsAlign(), Tmp.getPointer(),
         Tmp.getAlignment().getAsAlign(),
@@ -2663,8 +2663,8 @@ namespace {
     Address Arg;
     CopyBackSwiftError(Address temp, Address arg) : Temp(temp), Arg(arg) {}
     void Emit(CodeGenFunction &CGF, Flags flags) override {
-      llvm::Value *errorValue = CGF.Builder.CreateLoad(Temp);
-      CGF.Builder.CreateStore(errorValue, Arg);
+      llvm::Value *errorValue = CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, Temp);
+      CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, errorValue, Arg);
     }
   };
 }
@@ -2685,7 +2685,7 @@ void CodeGenFunction::EmitFunctionProlog(const CGFunctionInfo &FI,
       QualType RetTy = FD->getReturnType().getUnqualifiedType();
       llvm::Type* LLVMTy = CGM.getTypes().ConvertType(RetTy);
       llvm::Constant* Zero = llvm::Constant::getNullValue(LLVMTy);
-      Builder.CreateStore(Zero, ReturnValue);
+      Builder.CreateStore(!CGM.getCodeGenOpts().UseDefaultAlignment, Zero, ReturnValue);
     }
   }
 
@@ -2750,7 +2750,7 @@ void CodeGenFunction::EmitFunctionProlog(const CGFunctionInfo &FI,
       Address V =
           Builder.CreateStructGEP(ArgStruct, FieldIndex, Arg->getName());
       if (ArgI.getInAllocaIndirect())
-        V = Address(Builder.CreateLoad(V), ConvertTypeForMem(Ty),
+        V = Address(Builder.CreateLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, V), ConvertTypeForMem(Ty),
                     getContext().getTypeAlignInChars(Ty));
       ArgVals.push_back(ParamValue::forIndirect(V));
       break;
@@ -2901,8 +2901,8 @@ void CodeGenFunction::EmitFunctionProlog(const CGFunctionInfo &FI,
             CreateMemTemp(pointeeTy, getPointerAlign(), "swifterror.temp");
           Address arg(V, ConvertTypeForMem(pointeeTy),
                       getContext().getTypeAlignInChars(pointeeTy));
-          llvm::Value *incomingErrorValue = Builder.CreateLoad(arg);
-          Builder.CreateStore(incomingErrorValue, temp);
+          llvm::Value *incomingErrorValue = Builder.CreateLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, arg);
+          Builder.CreateStore(!CGM.getCodeGenOpts().UseDefaultAlignment, incomingErrorValue, temp);
           V = temp.getPointer();
 
           // Push a cleanup to copy the value back at the end of the function.
@@ -2987,7 +2987,7 @@ void CodeGenFunction::EmitFunctionProlog(const CGFunctionInfo &FI,
           auto AI = Fn->getArg(FirstIRArg + i);
           AI->setName(Arg->getName() + ".coerce" + Twine(i));
           Address EltPtr = Builder.CreateStructGEP(AddrToStoreInto, i);
-          Builder.CreateStore(AI, EltPtr);
+          Builder.CreateStore(!CGM.getCodeGenOpts().UseDefaultAlignment, AI, EltPtr);
         }
 
         if (SrcSize > DstSize) {
@@ -3031,7 +3031,7 @@ void CodeGenFunction::EmitFunctionProlog(const CGFunctionInfo &FI,
 
         auto eltAddr = Builder.CreateStructGEP(alloca, i);
         auto elt = Fn->getArg(argIndex++);
-        Builder.CreateStore(elt, eltAddr);
+        Builder.CreateStore(!CGM.getCodeGenOpts().UseDefaultAlignment, elt, eltAddr);
       }
       assert(argIndex == FirstIRArg + NumIRArgs);
       break;
@@ -3520,7 +3520,7 @@ void CodeGenFunction::EmitFunctionEpilog(const CGFunctionInfo &FI,
           FI.getArgStruct(), ArgStruct, RetAI.getInAllocaFieldIndex());
       llvm::Type *Ty =
           cast<llvm::GetElementPtrInst>(SRet)->getResultElementType();
-      RV = Builder.CreateAlignedLoad(Ty, SRet, getPointerAlign(), "sret");
+      RV = Builder.CreateAlignedLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, Ty, SRet, getPointerAlign(), "sret");
     }
     break;
 
@@ -3548,7 +3548,7 @@ void CodeGenFunction::EmitFunctionEpilog(const CGFunctionInfo &FI,
       LValue ArgVal =
           LValue::MakeAddr(ArgAddr, RetTy, getContext(), BaseInfo, TBAAInfo);
       EmitStoreOfScalar(
-          Builder.CreateLoad(ReturnValue), ArgVal, /*isInit*/ true);
+          Builder.CreateLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, ReturnValue), ArgVal, /*isInit*/ true);
       break;
     }
     }
@@ -3577,7 +3577,7 @@ void CodeGenFunction::EmitFunctionEpilog(const CGFunctionInfo &FI,
 
       // Otherwise, we have to do a simple load.
       } else {
-        RV = Builder.CreateLoad(ReturnValue);
+        RV = Builder.CreateLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, ReturnValue);
       }
     } else {
       // If the value is offset in memory, apply the offset now.
@@ -3629,7 +3629,7 @@ void CodeGenFunction::EmitFunctionEpilog(const CGFunctionInfo &FI,
         continue;
 
       auto eltAddr = Builder.CreateStructGEP(addr, i);
-      auto elt = Builder.CreateLoad(eltAddr);
+      auto elt = Builder.CreateLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, eltAddr);
       results.push_back(elt);
     }
 
@@ -3716,7 +3716,7 @@ void CodeGenFunction::EmitReturnValueCheck(llvm::Value *RV) {
   // nullability annotation, make sure the preconditions for the check are met.
   llvm::BasicBlock *Check = createBasicBlock("nullcheck");
   llvm::BasicBlock *NoCheck = createBasicBlock("no.nullcheck");
-  llvm::Value *SLocPtr = Builder.CreateLoad(ReturnLocation, "return.sloc.load");
+  llvm::Value *SLocPtr = Builder.CreateLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, ReturnLocation, "return.sloc.load");
   llvm::Value *CanNullCheck = Builder.CreateIsNotNull(SLocPtr);
   if (requiresReturnValueNullabilityCheck())
     CanNullCheck =
@@ -3754,7 +3754,7 @@ static AggValueSlot createPlaceholderSlot(CodeGenFunction &CGF,
   // FIXME: When we generate this IR in one pass, we shouldn't need
   // this win32-specific alignment hack.
   CharUnits Align = CharUnits::fromQuantity(4);
-  Placeholder = CGF.Builder.CreateAlignedLoad(IRPtrTy, Placeholder, Align);
+  Placeholder = CGF.Builder.CreateAlignedLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, IRPtrTy, Placeholder, Align);
 
   return AggValueSlot::forAddr(Address(Placeholder, IRTy, Align),
                                Ty.getQualifiers(),
@@ -3781,7 +3781,7 @@ void CodeGenFunction::EmitDelegateCallArg(CallArgList &args,
   // GetAddrOfLocalVar returns a pointer-to-pointer for references,
   // but the argument needs to be the original pointer.
   if (type->isReferenceType()) {
-    args.add(RValue::get(Builder.CreateLoad(local)), type);
+    args.add(RValue::get(Builder.CreateLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, local)), type);
 
   // In ARC, move out of consumed arguments so that the release cleanup
   // entered by StartFunction doesn't cause an over-release.  This isn't
@@ -3791,10 +3791,10 @@ void CodeGenFunction::EmitDelegateCallArg(CallArgList &args,
   } else if (getLangOpts().ObjCAutoRefCount &&
              param->hasAttr<NSConsumedAttr>() &&
              type->isObjCRetainableType()) {
-    llvm::Value *ptr = Builder.CreateLoad(local);
+    llvm::Value *ptr = Builder.CreateLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, local);
     auto null =
       llvm::ConstantPointerNull::get(cast<llvm::PointerType>(ptr->getType()));
-    Builder.CreateStore(null, local);
+    Builder.CreateStore(!CGM.getCodeGenOpts().UseDefaultAlignment, null, local);
     args.add(RValue::get(ptr), type);
 
   // For the most part, we just need to load the alloca, except that
@@ -3846,7 +3846,7 @@ static void emitWriteback(CodeGenFunction &CGF,
   }
 
   // Load the value to writeback.
-  llvm::Value *value = CGF.Builder.CreateLoad(writeback.Temporary);
+  llvm::Value *value = CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, writeback.Temporary);
 
   // Cast it back, in case we're writing an id to a Foo* or something.
   value = CGF.Builder.CreateBitCast(value, srcAddr.getElementType(),
@@ -3964,7 +3964,7 @@ static void emitWritebackArg(CodeGenFunction &CGF, CallArgList &args,
   if (!shouldCopy) {
     llvm::Value *null =
         llvm::ConstantPointerNull::get(cast<llvm::PointerType>(destElemType));
-    CGF.Builder.CreateStore(null, temp);
+    CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, null, temp);
   }
 
   llvm::BasicBlock *contBB = nullptr;
@@ -4008,7 +4008,7 @@ static void emitWritebackArg(CodeGenFunction &CGF, CallArgList &args,
     src = CGF.Builder.CreateBitCast(src, destElemType, "icr.cast");
 
     // Use an ordinary store, not a store-to-lvalue.
-    CGF.Builder.CreateStore(src, temp);
+    CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, src, temp);
 
     // If optimization is enabled, and the value was held in a
     // __strong variable, we need to tell the optimizer that this
@@ -4792,7 +4792,7 @@ RValue CodeGenFunction::EmitCall(const CGFunctionInfo &CallInfo,
     } else if (RetAI.isInAlloca()) {
       Address Addr =
           Builder.CreateStructGEP(ArgMemory, RetAI.getInAllocaFieldIndex());
-      Builder.CreateStore(SRetPtr.getPointer(), Addr);
+      Builder.CreateStore(!CGM.getCodeGenOpts().UseDefaultAlignment, SRetPtr.getPointer(), Addr);
     }
   }
 
@@ -4846,7 +4846,7 @@ RValue CodeGenFunction::EmitCall(const CGFunctionInfo &CallInfo,
           Addr = CreateMemTemp(info_it->type, "inalloca.indirect.tmp");
           Address ArgSlot = Builder.CreateStructGEP(
               ArgMemory, ArgInfo.getInAllocaFieldIndex());
-          Builder.CreateStore(Addr.getPointer(), ArgSlot);
+          Builder.CreateStore(!CGM.getCodeGenOpts().UseDefaultAlignment, Addr.getPointer(), ArgSlot);
         }
         deferPlaceholderReplacement(Placeholder, Addr.getPointer());
       } else if (ArgInfo.getInAllocaIndirect()) {
@@ -4858,7 +4858,7 @@ RValue CodeGenFunction::EmitCall(const CGFunctionInfo &CallInfo,
         I->copyInto(*this, Addr);
         Address ArgSlot =
             Builder.CreateStructGEP(ArgMemory, ArgInfo.getInAllocaFieldIndex());
-        Builder.CreateStore(Addr.getPointer(), ArgSlot);
+        Builder.CreateStore(!CGM.getCodeGenOpts().UseDefaultAlignment, Addr.getPointer(), ArgSlot);
       } else {
         // Store the RValue into the argument struct.
         Address Addr =
@@ -4978,7 +4978,7 @@ RValue CodeGenFunction::EmitCall(const CGFunctionInfo &CallInfo,
         if (!I->isAggregate())
           V = I->getKnownRValue().getScalarVal();
         else
-          V = Builder.CreateLoad(
+          V = Builder.CreateLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, 
               I->hasLValue() ? I->getKnownLValue().getAddress(*this)
                              : I->getKnownRValue().getAggregateAddress());
 
@@ -4997,8 +4997,8 @@ RValue CodeGenFunction::EmitCall(const CGFunctionInfo &CallInfo,
           V = swiftErrorTemp.getPointer();
           cast<llvm::AllocaInst>(V)->setSwiftError(true);
 
-          llvm::Value *errorValue = Builder.CreateLoad(swiftErrorArg);
-          Builder.CreateStore(errorValue, swiftErrorTemp);
+          llvm::Value *errorValue = Builder.CreateLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, swiftErrorArg);
+          Builder.CreateStore(!CGM.getCodeGenOpts().UseDefaultAlignment, errorValue, swiftErrorTemp);
         }
 
         // We might have to widen integers, but we should never truncate.
@@ -5055,7 +5055,7 @@ RValue CodeGenFunction::EmitCall(const CGFunctionInfo &CallInfo,
         assert(NumIRArgs == STy->getNumElements());
         for (unsigned i = 0, e = STy->getNumElements(); i != e; ++i) {
           Address EltPtr = Builder.CreateStructGEP(Src, i);
-          llvm::Value *LI = Builder.CreateLoad(EltPtr);
+          llvm::Value *LI = Builder.CreateLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, EltPtr);
           IRCallArgs[FirstIRArg + i] = LI;
         }
       } else {
@@ -5106,7 +5106,7 @@ RValue CodeGenFunction::EmitCall(const CGFunctionInfo &CallInfo,
                              /*ArraySize=*/nullptr, &AllocaAddr);
         tempSize = EmitLifetimeStart(scalarSize, AllocaAddr.getPointer());
 
-        Builder.CreateStore(RV.getScalarVal(), addr);
+        Builder.CreateStore(!CGM.getCodeGenOpts().UseDefaultAlignment, RV.getScalarVal(), addr);
       }
 
       addr = Builder.CreateElementBitCast(addr, coercionType);
@@ -5116,7 +5116,7 @@ RValue CodeGenFunction::EmitCall(const CGFunctionInfo &CallInfo,
         llvm::Type *eltType = coercionType->getElementType(i);
         if (ABIArgInfo::isPaddingForCoerceAndExpand(eltType)) continue;
         Address eltAddr = Builder.CreateStructGEP(addr, i);
-        llvm::Value *elt = Builder.CreateLoad(eltAddr);
+        llvm::Value *elt = Builder.CreateLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, eltAddr);
         IRCallArgs[IRArgPos++] = elt;
       }
       assert(IRArgPos == FirstIRArg + NumIRArgs);
@@ -5468,8 +5468,8 @@ RValue CodeGenFunction::EmitCall(const CGFunctionInfo &CallInfo,
 
   // Perform the swifterror writeback.
   if (swiftErrorTemp.isValid()) {
-    llvm::Value *errorResult = Builder.CreateLoad(swiftErrorTemp);
-    Builder.CreateStore(errorResult, swiftErrorArg);
+    llvm::Value *errorResult = Builder.CreateLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, swiftErrorTemp);
+    Builder.CreateStore(!CGM.getCodeGenOpts().UseDefaultAlignment, errorResult, swiftErrorArg);
   }
 
   // Emit any call-associated writebacks immediately.  Arguably this
@@ -5503,7 +5503,7 @@ RValue CodeGenFunction::EmitCall(const CGFunctionInfo &CallInfo,
           elt = Builder.CreateExtractValue(elt, unpaddedIndex++);
         else
           assert(unpaddedIndex == 0);
-        Builder.CreateStore(elt, eltAddr);
+        Builder.CreateStore(!CGM.getCodeGenOpts().UseDefaultAlignment, elt, eltAddr);
       }
       // FALLTHROUGH
       LLVM_FALLTHROUGH;

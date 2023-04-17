@@ -1212,7 +1212,7 @@ CodeGenFunction::EmitCXXForRangeStmt(const CXXForRangeStmt &S,
 
 void CodeGenFunction::EmitReturnOfRValue(RValue RV, QualType Ty) {
   if (RV.isScalar()) {
-    Builder.CreateStore(RV.getScalarVal(), ReturnValue);
+    Builder.CreateStore(!CGM.getCodeGenOpts().UseDefaultAlignment, RV.getScalarVal(), ReturnValue);
   } else if (RV.isAggregate()) {
     LValue Dest = MakeAddrLValue(ReturnValue, Ty);
     LValue Src = MakeAddrLValue(RV.getAggregateAddress(), Ty);
@@ -1281,7 +1281,7 @@ void CodeGenFunction::EmitReturnStmt(const ReturnStmt &S) {
     SLocPtr->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::Global);
     CGM.getSanitizerMetadata()->disableSanitizerForGlobal(SLocPtr);
     assert(ReturnLocation.isValid() && "No valid return location");
-    Builder.CreateStore(Builder.CreateBitCast(SLocPtr, Int8PtrTy),
+    Builder.CreateStore(!CGM.getCodeGenOpts().UseDefaultAlignment, Builder.CreateBitCast(SLocPtr, Int8PtrTy),
                         ReturnLocation);
   }
 
@@ -1338,11 +1338,11 @@ void CodeGenFunction::EmitReturnStmt(const ReturnStmt &S) {
     // If this function returns a reference, take the address of the expression
     // rather than the value.
     RValue Result = EmitReferenceBindingToExpr(RV);
-    Builder.CreateStore(Result.getScalarVal(), ReturnValue);
+    Builder.CreateStore(!CGM.getCodeGenOpts().UseDefaultAlignment, Result.getScalarVal(), ReturnValue);
   } else {
     switch (getEvaluationKind(RV->getType())) {
     case TEK_Scalar:
-      Builder.CreateStore(EmitScalarExpr(RV), ReturnValue);
+      Builder.CreateStore(!CGM.getCodeGenOpts().UseDefaultAlignment, EmitScalarExpr(RV), ReturnValue);
       break;
     case TEK_Complex:
       EmitComplexExprIntoLValue(RV, MakeAddrLValue(ReturnValue, RV->getType()),
@@ -2180,7 +2180,7 @@ std::pair<llvm::Value*, llvm::Type *> CodeGenFunction::EmitAsmInputLValue(
         getTargetHooks().isScalarizableAsmOperand(*this, Ty)) {
       Ty = llvm::IntegerType::get(getLLVMContext(), Size);
 
-      return {Builder.CreateLoad(Builder.CreateElementBitCast(
+      return {Builder.CreateLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, Builder.CreateElementBitCast(
                   InputValue.getAddress(*this), Ty)),
               nullptr};
     }
@@ -2784,7 +2784,7 @@ void CodeGenFunction::EmitAsmStmt(const AsmStmt &S) {
       Address A = Builder.CreateElementBitCast(Dest.getAddress(*this),
                                                ResultRegTypes[i]);
       if (getTargetHooks().isScalarizableAsmOperand(*this, TruncTy)) {
-        Builder.CreateStore(Tmp, A);
+        Builder.CreateStore(!CGM.getCodeGenOpts().UseDefaultAlignment, Tmp, A);
         continue;
       }
 
@@ -2879,7 +2879,7 @@ CodeGenFunction::GenerateCapturedStmtFunction(const CapturedStmt &S) {
                 CD->getBody()->getBeginLoc());
   // Set the context parameter in CapturedStmtInfo.
   Address DeclPtr = GetAddrOfLocalVar(CD->getContextParam());
-  CapturedStmtInfo->setContextValue(Builder.CreateLoad(DeclPtr));
+  CapturedStmtInfo->setContextValue(Builder.CreateLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, DeclPtr));
 
   // Initialize variable-length arrays.
   LValue Base = MakeNaturalAlignAddrLValue(CapturedStmtInfo->getContextValue(),

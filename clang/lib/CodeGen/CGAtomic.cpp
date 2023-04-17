@@ -379,8 +379,8 @@ static void emitAtomicCmpXchg(CodeGenFunction &CGF, AtomicExpr *E, bool IsWeak,
                               llvm::AtomicOrdering FailureOrder,
                               llvm::SyncScope::ID Scope) {
   // Note that cmpxchg doesn't support weak cmpxchg, at least at the moment.
-  llvm::Value *Expected = CGF.Builder.CreateLoad(Val1);
-  llvm::Value *Desired = CGF.Builder.CreateLoad(Val2);
+  llvm::Value *Expected = CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, Val1);
+  llvm::Value *Desired = CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, Val2);
 
   llvm::AtomicCmpXchgInst *Pair = CGF.Builder.CreateAtomicCmpXchg(
       Ptr.getPointer(), Expected, Desired, SuccessOrder, FailureOrder,
@@ -409,7 +409,7 @@ static void emitAtomicCmpXchg(CodeGenFunction &CGF, AtomicExpr *E, bool IsWeak,
 
   CGF.Builder.SetInsertPoint(StoreExpectedBB);
   // Update the memory at Expected with Old's value.
-  CGF.Builder.CreateStore(Old, Val1);
+  CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, Old, Val1);
   // Finally, branch to the exit point.
   CGF.Builder.CreateBr(ContinueBB);
 
@@ -579,10 +579,10 @@ static void EmitAtomicOp(CodeGenFunction &CGF, AtomicExpr *E, Address Dest,
   case AtomicExpr::AO__hip_atomic_load:
   case AtomicExpr::AO__atomic_load_n:
   case AtomicExpr::AO__atomic_load: {
-    llvm::LoadInst *Load = CGF.Builder.CreateLoad(Ptr);
+    llvm::LoadInst *Load = CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, Ptr);
     Load->setAtomic(Order, Scope);
     Load->setVolatile(E->isVolatile());
-    CGF.Builder.CreateStore(Load, Dest);
+    CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, Load, Dest);
     return;
   }
 
@@ -591,8 +591,8 @@ static void EmitAtomicOp(CodeGenFunction &CGF, AtomicExpr *E, Address Dest,
   case AtomicExpr::AO__hip_atomic_store:
   case AtomicExpr::AO__atomic_store:
   case AtomicExpr::AO__atomic_store_n: {
-    llvm::Value *LoadVal1 = CGF.Builder.CreateLoad(Val1);
-    llvm::StoreInst *Store = CGF.Builder.CreateStore(LoadVal1, Ptr);
+    llvm::Value *LoadVal1 = CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, Val1);
+    llvm::StoreInst *Store = CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, LoadVal1, Ptr);
     Store->setAtomic(Order, Scope);
     Store->setVolatile(E->isVolatile());
     return;
@@ -690,7 +690,7 @@ static void EmitAtomicOp(CodeGenFunction &CGF, AtomicExpr *E, Address Dest,
     break;
   }
 
-  llvm::Value *LoadVal1 = CGF.Builder.CreateLoad(Val1);
+  llvm::Value *LoadVal1 = CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, Val1);
   llvm::AtomicRMWInst *RMWI =
       CGF.Builder.CreateAtomicRMW(Op, Ptr.getPointer(), LoadVal1, Order, Scope);
   RMWI->setVolatile(E->isVolatile());
@@ -707,7 +707,7 @@ static void EmitAtomicOp(CodeGenFunction &CGF, AtomicExpr *E, Address Dest,
                                      LoadVal1);
   if (E->getOp() == AtomicExpr::AO__atomic_nand_fetch)
     Result = CGF.Builder.CreateNot(Result);
-  CGF.Builder.CreateStore(Result, Dest);
+  CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, Result, Dest);
 }
 
 // This function emits any expression (scalar, complex, or aggregate)
@@ -1329,7 +1329,7 @@ RValue CodeGenFunction::EmitAtomicExpr(AtomicExpr *E) {
       if (E->getOp() == AtomicExpr::AO__atomic_nand_fetch)
         ResVal = Builder.CreateNot(ResVal);
 
-      Builder.CreateStore(
+      Builder.CreateStore(!CGM.getCodeGenOpts().UseDefaultAlignment, 
           ResVal, Builder.CreateElementBitCast(Dest, ResVal->getType()));
     }
 
@@ -1503,7 +1503,7 @@ RValue AtomicInfo::convertAtomicTempToRValue(Address addr,
   }
   if (!asValue)
     // Get RValue from temp memory as atomic for non-simple lvalues
-    return RValue::get(CGF.Builder.CreateLoad(addr));
+    return RValue::get(CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, addr));
   if (LVal.isBitField())
     return CGF.EmitLoadOfBitfieldLValue(
         LValue::MakeBitfield(addr, LVal.getBitFieldInfo(), LVal.getType(),
@@ -1555,7 +1555,7 @@ RValue AtomicInfo::ConvertIntToValueOrAtomic(llvm::Value *IntVal,
 
   // Slam the integer into the temporary.
   Address CastTemp = emitCastToAtomicIntPointer(Temp);
-  CGF.Builder.CreateStore(IntVal, CastTemp)
+  CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, IntVal, CastTemp)
       ->setVolatile(TempIsVolatile);
 
   return convertAtomicTempToRValue(Temp, ResultSlot, Loc, AsValue);
@@ -1580,7 +1580,7 @@ llvm::Value *AtomicInfo::EmitAtomicLoadOp(llvm::AtomicOrdering AO,
                                           bool IsVolatile) {
   // Okay, we're doing this natively.
   Address Addr = getAtomicAddressAsAtomicIntPointer();
-  llvm::LoadInst *Load = CGF.Builder.CreateLoad(Addr, "atomic-load");
+  llvm::LoadInst *Load = CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, Addr, "atomic-load");
   Load->setAtomic(AO);
 
   // Other decoration.
@@ -1733,7 +1733,7 @@ llvm::Value *AtomicInfo::convertRValueToInt(RValue RVal) const {
 
   // Cast the temporary to the atomic int type and pull a value out.
   Addr = emitCastToAtomicIntPointer(Addr);
-  return CGF.Builder.CreateLoad(Addr);
+  return CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, Addr);
 }
 
 std::pair<llvm::Value *, llvm::Value *> AtomicInfo::EmitAtomicCompareExchangeOp(
@@ -1879,8 +1879,8 @@ void AtomicInfo::EmitAtomicUpdateLibcall(
   Address DesiredAddr = CreateTempAlloca();
   if ((LVal.isBitField() && BFI.Size != ValueSizeInBits) ||
       requiresMemSetZero(getAtomicAddress().getElementType())) {
-    auto *OldVal = CGF.Builder.CreateLoad(ExpectedAddr);
-    CGF.Builder.CreateStore(OldVal, DesiredAddr);
+    auto *OldVal = CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, ExpectedAddr);
+    CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, OldVal, DesiredAddr);
   }
   auto OldRVal = convertAtomicTempToRValue(ExpectedAddr,
                                            AggValueSlot::ignored(),
@@ -1913,12 +1913,12 @@ void AtomicInfo::EmitAtomicUpdateOp(
   Address NewAtomicIntAddr = emitCastToAtomicIntPointer(NewAtomicAddr);
   if ((LVal.isBitField() && BFI.Size != ValueSizeInBits) ||
       requiresMemSetZero(getAtomicAddress().getElementType())) {
-    CGF.Builder.CreateStore(PHI, NewAtomicIntAddr);
+    CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, PHI, NewAtomicIntAddr);
   }
   auto OldRVal = ConvertIntToValueOrAtomic(PHI, AggValueSlot::ignored(),
                                            SourceLocation(), /*AsValue=*/false);
   EmitAtomicUpdateValue(CGF, *this, OldRVal, UpdateOp, NewAtomicAddr);
-  auto *DesiredVal = CGF.Builder.CreateLoad(NewAtomicIntAddr);
+  auto *DesiredVal = CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, NewAtomicIntAddr);
   // Try to write new value using cmpxchg operation.
   auto Res = EmitAtomicCompareExchangeOp(PHI, DesiredVal, AO, Failure);
   PHI->addIncoming(Res.first, CGF.Builder.GetInsertBlock());
@@ -1965,8 +1965,8 @@ void AtomicInfo::EmitAtomicUpdateLibcall(llvm::AtomicOrdering AO,
   Address DesiredAddr = CreateTempAlloca();
   if ((LVal.isBitField() && BFI.Size != ValueSizeInBits) ||
       requiresMemSetZero(getAtomicAddress().getElementType())) {
-    auto *OldVal = CGF.Builder.CreateLoad(ExpectedAddr);
-    CGF.Builder.CreateStore(OldVal, DesiredAddr);
+    auto *OldVal = CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, ExpectedAddr);
+    CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, OldVal, DesiredAddr);
   }
   EmitAtomicUpdateValue(CGF, *this, UpdateRVal, DesiredAddr);
   auto *Res =
@@ -1995,10 +1995,10 @@ void AtomicInfo::EmitAtomicUpdateOp(llvm::AtomicOrdering AO, RValue UpdateRVal,
   Address NewAtomicIntAddr = emitCastToAtomicIntPointer(NewAtomicAddr);
   if ((LVal.isBitField() && BFI.Size != ValueSizeInBits) ||
       requiresMemSetZero(getAtomicAddress().getElementType())) {
-    CGF.Builder.CreateStore(PHI, NewAtomicIntAddr);
+    CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, PHI, NewAtomicIntAddr);
   }
   EmitAtomicUpdateValue(CGF, *this, UpdateRVal, NewAtomicAddr);
-  auto *DesiredVal = CGF.Builder.CreateLoad(NewAtomicIntAddr);
+  auto *DesiredVal = CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, NewAtomicIntAddr);
   // Try to write new value using cmpxchg operation.
   auto Res = EmitAtomicCompareExchangeOp(PHI, DesiredVal, AO, Failure);
   PHI->addIncoming(Res.first, CGF.Builder.GetInsertBlock());
@@ -2090,7 +2090,7 @@ void CodeGenFunction::EmitAtomicStore(RValue rvalue, LValue dest,
         atomics.emitCastToAtomicIntPointer(atomics.getAtomicAddress());
     intValue = Builder.CreateIntCast(
         intValue, addr.getElementType(), /*isSigned=*/false);
-    llvm::StoreInst *store = Builder.CreateStore(intValue, addr);
+    llvm::StoreInst *store = Builder.CreateStore(!CGM.getCodeGenOpts().UseDefaultAlignment, intValue, addr);
 
     if (AO == llvm::AtomicOrdering::Acquire)
       AO = llvm::AtomicOrdering::Monotonic;

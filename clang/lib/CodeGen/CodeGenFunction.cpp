@@ -569,7 +569,7 @@ CodeGenFunction::DecodeAddrUsedInPrologue(llvm::Value *F,
   auto *GOTAddr = Builder.CreateIntToPtr(GOTAsInt, Int8PtrPtrTy, "global_addr");
 
   // Load the original pointer through the global.
-  return Builder.CreateLoad(Address(GOTAddr, Int8PtrTy, getPointerAlign()),
+  return Builder.CreateLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, Address(GOTAddr, Int8PtrTy, getPointerAlign()),
                             "decoded_addr");
 }
 
@@ -1004,7 +1004,7 @@ void CodeGenFunction::StartFunction(GlobalDecl GD, QualType RetTy,
   // precise source location of the checked return statement.
   if (requiresReturnValueCheck()) {
     ReturnLocation = CreateDefaultAlignTempAlloca(Int8PtrTy, "return.sloc.ptr");
-    Builder.CreateStore(llvm::ConstantPointerNull::get(Int8PtrTy),
+    Builder.CreateStore(!CGM.getCodeGenOpts().UseDefaultAlignment, llvm::ConstantPointerNull::get(Int8PtrTy),
                         ReturnLocation);
   }
 
@@ -1090,7 +1090,7 @@ void CodeGenFunction::StartFunction(GlobalDecl GD, QualType RetTy,
     if (!CurFnInfo->getReturnInfo().getIndirectByVal()) {
       ReturnValuePointer =
           CreateDefaultAlignTempAlloca(Int8PtrTy, "result.ptr");
-      Builder.CreateStore(Builder.CreatePointerBitCastOrAddrSpaceCast(
+      Builder.CreateStore(!CGM.getCodeGenOpts().UseDefaultAlignment, Builder.CreatePointerBitCastOrAddrSpaceCast(
                               ReturnValue.getPointer(), Int8PtrTy),
                           ReturnValuePointer);
     }
@@ -1105,7 +1105,7 @@ void CodeGenFunction::StartFunction(GlobalDecl GD, QualType RetTy,
     llvm::Type *Ty =
         cast<llvm::GetElementPtrInst>(Addr)->getResultElementType();
     ReturnValuePointer = Address(Addr, Ty, getPointerAlign());
-    Addr = Builder.CreateAlignedLoad(Ty, Addr, getPointerAlign(), "agg.result");
+    Addr = Builder.CreateAlignedLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, Ty, Addr, getPointerAlign(), "agg.result");
     ReturnValue =
         Address(Addr, ConvertType(RetTy), CGM.getNaturalTypeAlignment(RetTy));
   } else {

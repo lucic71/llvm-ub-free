@@ -326,7 +326,7 @@ static std::array<Address, N> getParamAddrs(std::index_sequence<Ints...> IntSeq,
                                             FunctionArgList Args,
                                             CodeGenFunction *CGF) {
   return std::array<Address, N>{
-      {Address(CGF->Builder.CreateLoad(CGF->GetAddrOfLocalVar(Args[Ints])),
+      {Address(CGF->Builder.CreateLoad(!CGF->CGM.getCodeGenOpts().UseDefaultAlignment, CGF->GetAddrOfLocalVar(Args[Ints])),
                CGF->VoidPtrTy, Alignments[Ints])...}};
 }
 
@@ -536,8 +536,8 @@ struct GenBinaryFunc : CopyStructVisitor<Derived, IsMove>,
           Size.getQuantity() * this->CGF->getContext().getCharWidth());
       DstAddr = this->CGF->Builder.CreateElementBitCast(DstAddr, Ty);
       SrcAddr = this->CGF->Builder.CreateElementBitCast(SrcAddr, Ty);
-      llvm::Value *SrcVal = this->CGF->Builder.CreateLoad(SrcAddr, false);
-      this->CGF->Builder.CreateStore(SrcVal, DstAddr, false);
+      llvm::Value *SrcVal = this->CGF->Builder.CreateLoad(!this->CGF->CGM.getCodeGenOpts().UseDefaultAlignment, SrcAddr, false);
+      this->CGF->Builder.CreateStore(!this->CGF->CGM.getCodeGenOpts().UseDefaultAlignment, SrcVal, DstAddr, false);
     }
 
     this->Start = this->End = CharUnits::Zero();

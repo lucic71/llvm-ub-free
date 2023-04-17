@@ -147,7 +147,7 @@ RValue CodeGenFunction::EmitCXXPseudoDestructorExpr(
       break;
 
     case Qualifiers::OCL_Strong:
-      EmitARCRelease(Builder.CreateLoad(BaseValue,
+      EmitARCRelease(Builder.CreateLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, BaseValue,
                         DestroyedType.isVolatileQualified()),
                      ARCPreciseLifetime);
       break;
@@ -1086,7 +1086,7 @@ void CodeGenFunction::EmitNewArrayInitializer(
       // alloca.
       EndOfInit = CreateTempAlloca(BeginPtr.getType(), getPointerAlign(),
                                    "array.init.end");
-      CleanupDominator = Builder.CreateStore(BeginPtr.getPointer(), EndOfInit);
+      CleanupDominator = Builder.CreateStore(!CGM.getCodeGenOpts().UseDefaultAlignment, BeginPtr.getPointer(), EndOfInit);
       pushIrregularPartialArrayCleanup(BeginPtr.getPointer(), EndOfInit,
                                        ElementType, ElementAlign,
                                        getDestroyer(DtorKind));
@@ -1101,7 +1101,7 @@ void CodeGenFunction::EmitNewArrayInitializer(
       if (EndOfInit.isValid()) {
         auto FinishedPtr =
           Builder.CreateBitCast(CurPtr.getPointer(), BeginPtr.getType());
-        Builder.CreateStore(FinishedPtr, EndOfInit);
+        Builder.CreateStore(!CGM.getCodeGenOpts().UseDefaultAlignment, FinishedPtr, EndOfInit);
       }
       // FIXME: If the last initializer is an incomplete initializer list for
       // an array, and we have an array filler, we can fold together the two
@@ -1165,7 +1165,7 @@ void CodeGenFunction::EmitNewArrayInitializer(
     // FIXME: Share this cleanup with the constructor call emission rather than
     // having it create a cleanup of its own.
     if (EndOfInit.isValid())
-      Builder.CreateStore(CurPtr.getPointer(), EndOfInit);
+      Builder.CreateStore(!CGM.getCodeGenOpts().UseDefaultAlignment, CurPtr.getPointer(), EndOfInit);
 
     // Emit a constructor call loop to initialize the remaining elements.
     if (InitListElements)
@@ -1252,7 +1252,7 @@ void CodeGenFunction::EmitNewArrayInitializer(
 
   // Store the new Cleanup position for irregular Cleanups.
   if (EndOfInit.isValid())
-    Builder.CreateStore(CurPtr.getPointer(), EndOfInit);
+    Builder.CreateStore(!CGM.getCodeGenOpts().UseDefaultAlignment, CurPtr.getPointer(), EndOfInit);
 
   // Enter a partial-destruction Cleanup if necessary.
   if (!CleanupDominator && needsEHCleanup(DtorKind)) {

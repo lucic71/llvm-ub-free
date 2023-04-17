@@ -68,6 +68,23 @@ public:
 
   // Note that we intentionally hide the CreateLoad APIs that don't
   // take an alignment.
+  llvm::LoadInst *CreateLoad(Address Addr, const llvm::Twine &Name = "") {
+      return CreateAlignedLoad(Addr.getElementType(), Addr.getPointer(),
+                             Addr.getAlignment().getAsAlign(), Name);
+  }
+  llvm::LoadInst *CreateLoad(Address Addr, const char *Name) {
+    // This overload is required to prevent string literals from
+    // ending up in the IsVolatile overload.
+      return CreateAlignedLoad(Addr.getElementType(), Addr.getPointer(),
+                             Addr.getAlignment().getAsAlign(), Name);
+  }
+  llvm::LoadInst *CreateLoad(Address Addr, bool IsVolatile,
+                             const llvm::Twine &Name = "") {
+      return CreateAlignedLoad(Addr.getElementType(), Addr.getPointer(),
+                             Addr.getAlignment().getAsAlign(), IsVolatile,
+                             Name);
+  }
+
   llvm::LoadInst *CreateLoad(bool AlignOne, Address Addr, const llvm::Twine &Name = "") {
 		if (AlignOne)
       return CreateAlignedLoad(Addr.getElementType(), Addr.getPointer(),
@@ -99,7 +116,7 @@ public:
   }
 
   using CGBuilderBaseTy::CreateAlignedLoad;
-  llvm::LoadInst *CreateAlignedLoad(llvm::Type *Ty, llvm::Value *Addr,
+  llvm::LoadInst *CreateAlignedLoad(bool AlignOne, llvm::Type *Ty, llvm::Value *Addr,
                                     CharUnits Align,
                                     const llvm::Twine &Name = "") {
     assert(llvm::cast<llvm::PointerType>(Addr->getType())
@@ -114,6 +131,12 @@ public:
   // take an alignment.
   llvm::StoreInst *CreateStore(llvm::Value *Val, Address Addr,
                                bool IsVolatile = false) {
+      return CreateAlignedStore(Val, Addr.getPointer(),
+                              Addr.getAlignment().getAsAlign(), IsVolatile);
+  }
+
+  llvm::StoreInst *CreateStore(bool AlignOne, llvm::Value *Val, Address Addr,
+                               bool IsVolatile = false) {
 		if (AlignOne)
       return CreateAlignedStore(Val, Addr.getPointer(),
                               llvm::MaybeAlign(1), IsVolatile);
@@ -123,7 +146,7 @@ public:
   }
 
   using CGBuilderBaseTy::CreateAlignedStore;
-  llvm::StoreInst *CreateAlignedStore(llvm::Value *Val, llvm::Value *Addr,
+  llvm::StoreInst *CreateAlignedStore(bool AlignOne, llvm::Value *Val, llvm::Value *Addr,
                                       CharUnits Align,
                                       bool IsVolatile = false) {
 		if (AlignOne)
@@ -134,7 +157,7 @@ public:
 
   // FIXME: these "default-aligned" APIs should be removed,
   // but I don't feel like fixing all the builtin code right now.
-  llvm::StoreInst *CreateDefaultAlignedStore(llvm::Value *Val,
+  llvm::StoreInst *CreateDefaultAlignedStore(bool AlignOne, llvm::Value *Val,
                                              llvm::Value *Addr,
                                              bool IsVolatile = false) {
 		if (AlignOne)
@@ -148,14 +171,14 @@ public:
                                  const llvm::Twine &Name = "") {
     assert(llvm::cast<llvm::PointerType>(Addr->getType())
                ->isOpaqueOrPointeeTypeMatches(getInt1Ty()));
-    return CreateAlignedLoad(getInt1Ty(), Addr, CharUnits::One(), Name);
+    return CreateAlignedLoad(true, getInt1Ty(), Addr, CharUnits::One(), Name);
   }
 
   /// Emit a store to an i1 flag variable.
   llvm::StoreInst *CreateFlagStore(bool Value, llvm::Value *Addr) {
     assert(llvm::cast<llvm::PointerType>(Addr->getType())
                ->isOpaqueOrPointeeTypeMatches(getInt1Ty()));
-    return CreateAlignedStore(getInt1(Value), Addr, CharUnits::One());
+    return CreateAlignedStore(true, getInt1(Value), Addr, CharUnits::One());
   }
 
   // Temporarily use old signature; clang will be updated to an Address overload
