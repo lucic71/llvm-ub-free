@@ -147,7 +147,7 @@ RValue CodeGenFunction::EmitCXXPseudoDestructorExpr(
       break;
 
     case Qualifiers::OCL_Strong:
-      EmitARCRelease(Builder.CreateLoad(BaseValue,
+      EmitARCRelease(Builder.CreateLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, BaseValue,
                         DestroyedType.isVolatileQualified()),
                      ARCPreciseLifetime);
       break;
@@ -560,10 +560,13 @@ static void EmitNullBaseClassInitialization(CodeGenFunction &CGF,
       CharUnits StoreOffset = Store.first;
       CharUnits StoreSize = Store.second;
       llvm::Value *StoreSizeVal = CGF.CGM.getSize(StoreSize);
-      CGF.Builder.CreateMemCpy(
-          CGF.Builder.CreateConstInBoundsByteGEP(DestPtr, StoreOffset),
-          CGF.Builder.CreateConstInBoundsByteGEP(SrcPtr, StoreOffset),
-          StoreSizeVal);
+      Address Dest = CGF.Builder.CreateConstInBoundsByteGEP(DestPtr, StoreOffset);
+      Address Src = CGF.Builder.CreateConstInBoundsByteGEP(SrcPtr, StoreOffset);
+      if (!CGF.CGM.getCodeGenOpts().UseDefaultAlignment) {
+        Dest = Dest.withAlignment(CharUnits::One()); 
+        Src = Src.withAlignment(CharUnits::One()); 
+      }
+      CGF.Builder.CreateMemCpy(Dest, Src, StoreSizeVal);
     }
 
   // Otherwise, just memset the whole thing to zero.  This is legal
@@ -575,7 +578,9 @@ static void EmitNullBaseClassInitialization(CodeGenFunction &CGF,
       CharUnits StoreSize = Store.second;
       llvm::Value *StoreSizeVal = CGF.CGM.getSize(StoreSize);
       CGF.Builder.CreateMemSet(
-          CGF.Builder.CreateConstInBoundsByteGEP(DestPtr, StoreOffset),
+          CGF.CGM.getCodeGenOpts().UseDefaultAlignment
+          ? CGF.Builder.CreateConstInBoundsByteGEP(DestPtr, StoreOffset)
+          : CGF.Builder.CreateConstInBoundsByteGEP(DestPtr, StoreOffset).withAlignment(CharUnits::One()),
           CGF.Builder.getInt8(0), StoreSizeVal);
     }
   }
@@ -1027,7 +1032,7 @@ void CodeGenFunction::EmitNewArrayInitializer(
     }
 
     // Create the memset.
-    Builder.CreateMemSet(CurPtr, Builder.getInt8(0), RemainingSize, false);
+    Builder.CreateMemSet(CGM.getCodeGenOpts().UseDefaultAlignment ? CurPtr : CurPtr.withAlignment(CharUnits::One()), Builder.getInt8(0), RemainingSize, false);
     return true;
   };
 
@@ -1086,7 +1091,7 @@ void CodeGenFunction::EmitNewArrayInitializer(
       // alloca.
       EndOfInit = CreateTempAlloca(BeginPtr.getType(), getPointerAlign(),
                                    "array.init.end");
-      CleanupDominator = Builder.CreateStore(BeginPtr.getPointer(), EndOfInit);
+      CleanupDominator = Builder.CreateStore(!CGM.getCodeGenOpts().UseDefaultAlignment, BeginPtr.getPointer(), EndOfInit);
       pushIrregularPartialArrayCleanup(BeginPtr.getPointer(), EndOfInit,
                                        ElementType, ElementAlign,
                                        getDestroyer(DtorKind));
@@ -1101,7 +1106,7 @@ void CodeGenFunction::EmitNewArrayInitializer(
       if (EndOfInit.isValid()) {
         auto FinishedPtr =
           Builder.CreateBitCast(CurPtr.getPointer(), BeginPtr.getType());
-        Builder.CreateStore(FinishedPtr, EndOfInit);
+        Builder.CreateStore(!CGM.getCodeGenOpts().UseDefaultAlignment, FinishedPtr, EndOfInit);
       }
       // FIXME: If the last initializer is an incomplete initializer list for
       // an array, and we have an array filler, we can fold together the two
@@ -1165,7 +1170,7 @@ void CodeGenFunction::EmitNewArrayInitializer(
     // FIXME: Share this cleanup with the constructor call emission rather than
     // having it create a cleanup of its own.
     if (EndOfInit.isValid())
-      Builder.CreateStore(CurPtr.getPointer(), EndOfInit);
+      Builder.CreateStore(!CGM.getCodeGenOpts().UseDefaultAlignment, CurPtr.getPointer(), EndOfInit);
 
     // Emit a constructor call loop to initialize the remaining elements.
     if (InitListElements)
@@ -1252,7 +1257,7 @@ void CodeGenFunction::EmitNewArrayInitializer(
 
   // Store the new Cleanup position for irregular Cleanups.
   if (EndOfInit.isValid())
-    Builder.CreateStore(CurPtr.getPointer(), EndOfInit);
+    Builder.CreateStore(!CGM.getCodeGenOpts().UseDefaultAlignment, CurPtr.getPointer(), EndOfInit);
 
   // Enter a partial-destruction Cleanup if necessary.
   if (!CleanupDominator && needsEHCleanup(DtorKind)) {

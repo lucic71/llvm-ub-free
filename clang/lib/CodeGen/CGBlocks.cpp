@@ -859,7 +859,7 @@ llvm::Value *CodeGenFunction::EmitBlockLiteral(const CGBlockInfo &blockInfo) {
     return Builder.CreateStructGEP(blockAddr, index, name);
   };
   auto storeField = [&](llvm::Value *value, unsigned index, const Twine &name) {
-    Builder.CreateStore(value, projectField(index, name));
+    Builder.CreateStore(!CGM.getCodeGenOpts().UseDefaultAlignment, value, projectField(index, name));
   };
 
   // Initialize the block header.
@@ -910,7 +910,7 @@ llvm::Value *CodeGenFunction::EmitBlockLiteral(const CGBlockInfo &blockInfo) {
   if (blockDecl->capturesCXXThis()) {
     Address addr =
         projectField(blockInfo.CXXThisIndex, "block.captured-this.addr");
-    Builder.CreateStore(LoadCXXThis(), addr);
+    Builder.CreateStore(!CGM.getCodeGenOpts().UseDefaultAlignment, LoadCXXThis(), addr);
   }
 
   // Next, captured variables.
@@ -966,12 +966,12 @@ llvm::Value *CodeGenFunction::EmitBlockLiteral(const CGBlockInfo &blockInfo) {
       // Get a void* that points to the byref struct.
       llvm::Value *byrefPointer;
       if (CI.isNested())
-        byrefPointer = Builder.CreateLoad(src, "byref.capture");
+        byrefPointer = Builder.CreateLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, src, "byref.capture");
       else
         byrefPointer = Builder.CreateBitCast(src.getPointer(), VoidPtrTy);
 
       // Write that void* into the capture field.
-      Builder.CreateStore(byrefPointer, blockField);
+      Builder.CreateStore(!CGM.getCodeGenOpts().UseDefaultAlignment, byrefPointer, blockField);
 
     // If we have a copy constructor, evaluate that into the block field.
     } else if (const Expr *copyExpr = CI.getCopyExpr()) {
@@ -991,14 +991,14 @@ llvm::Value *CodeGenFunction::EmitBlockLiteral(const CGBlockInfo &blockInfo) {
 
     // If it's a reference variable, copy the reference into the block field.
     } else if (type->isReferenceType()) {
-      Builder.CreateStore(src.getPointer(), blockField);
+      Builder.CreateStore(!CGM.getCodeGenOpts().UseDefaultAlignment, src.getPointer(), blockField);
 
     // If type is const-qualified, copy the value into the block field.
     } else if (type.isConstQualified() &&
                type.getObjCLifetime() == Qualifiers::OCL_Strong &&
                CGM.getCodeGenOpts().OptimizationLevel != 0) {
-      llvm::Value *value = Builder.CreateLoad(src, "captured");
-      Builder.CreateStore(value, blockField);
+      llvm::Value *value = Builder.CreateLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, src, "captured");
+      Builder.CreateStore(!CGM.getCodeGenOpts().UseDefaultAlignment, value, blockField);
 
     // If this is an ARC __strong block-pointer variable, don't do a
     // block copy.
@@ -1010,11 +1010,11 @@ llvm::Value *CodeGenFunction::EmitBlockLiteral(const CGBlockInfo &blockInfo) {
     } else if (type.getObjCLifetime() == Qualifiers::OCL_Strong &&
                type->isBlockPointerType()) {
       // Load the block and do a simple retain.
-      llvm::Value *value = Builder.CreateLoad(src, "block.captured_block");
+      llvm::Value *value = Builder.CreateLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, src, "block.captured_block");
       value = EmitARCRetainNonBlock(value);
 
       // Do a primitive store to the block field.
-      Builder.CreateStore(value, blockField);
+      Builder.CreateStore(!CGM.getCodeGenOpts().UseDefaultAlignment, value, blockField);
 
     // Otherwise, fake up a POD copy into the block field.
     } else {
@@ -1211,7 +1211,7 @@ RValue CodeGenFunction::EmitBlockCallExpr(const CallExpr *E,
       Func = CGM.getOpenCLRuntime().getInvokeFunction(E->getCallee());
     else {
       llvm::Value *FuncPtr = Builder.CreateStructGEP(GenBlockTy, BlockPtr, 2);
-      Func = Builder.CreateAlignedLoad(GenericVoidPtrTy, FuncPtr,
+      Func = Builder.CreateAlignedLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, GenericVoidPtrTy, FuncPtr,
                                        getPointerAlign());
     }
   } else {
@@ -1228,7 +1228,7 @@ RValue CodeGenFunction::EmitBlockCallExpr(const CallExpr *E,
     EmitCallArgs(Args, FnType->getAs<FunctionProtoType>(), E->arguments());
 
     // Load the function.
-    Func = Builder.CreateAlignedLoad(VoidPtrTy, FuncPtr, getPointerAlign());
+    Func = Builder.CreateAlignedLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, VoidPtrTy, FuncPtr, getPointerAlign());
   }
 
   const FunctionType *FuncTy = FnType->castAs<FunctionType>();
@@ -1263,7 +1263,7 @@ Address CodeGenFunction::GetAddrOfBlockDecl(const VarDecl *variable) {
     // to byref*.
 
     auto &byrefInfo = getBlockByrefInfo(variable);
-    addr = Address(Builder.CreateLoad(addr), Int8Ty, byrefInfo.ByrefAlignment);
+    addr = Address(Builder.CreateLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, addr), Int8Ty, byrefInfo.ByrefAlignment);
 
     addr = Builder.CreateElementBitCast(addr, byrefInfo.Type, "byref.addr");
 
@@ -1379,7 +1379,12 @@ static llvm::Constant *buildGlobalBlock(CodeGenModule &CGM,
         &CGM.getModule());
     llvm::IRBuilder<> b(llvm::BasicBlock::Create(CGM.getLLVMContext(), "entry",
           Init));
-    b.CreateAlignedStore(CGM.getNSConcreteGlobalBlock(),
+		if (!CGM.getCodeGenOpts().UseDefaultAlignment)
+      b.CreateAlignedStore(CGM.getNSConcreteGlobalBlock(),
+                         b.CreateStructGEP(literal->getValueType(), literal, 0),
+                         llvm::MaybeAlign(1));
+		else
+      b.CreateAlignedStore(CGM.getNSConcreteGlobalBlock(),
                          b.CreateStructGEP(literal->getValueType(), literal, 0),
                          CGM.getPointerAlign().getAsAlign());
     b.CreateRetVoid();
@@ -1414,7 +1419,7 @@ void CodeGenFunction::setBlockContextParameter(const ImplicitParamDecl *D,
   // Allocate a stack slot like for any local variable to guarantee optimal
   // debug info at -O0. The mem2reg pass will eliminate it when optimizing.
   Address alloc = CreateMemTemp(D->getType(), D->getName() + ".addr");
-  Builder.CreateStore(arg, alloc);
+  Builder.CreateStore(!CGM.getCodeGenOpts().UseDefaultAlignment, arg, alloc);
   if (CGDebugInfo *DI = getDebugInfo()) {
     if (CGM.getCodeGenOpts().hasReducedDebugInfo()) {
       DI->setLocation(D->getLocation());
@@ -1531,7 +1536,7 @@ llvm::Function *CodeGenFunction::GenerateBlockFunction(
     // Set the DebugLocation to empty, so the store is recognized as a
     // frame setup instruction by llvm::DwarfDebug::beginFunction().
     auto NL = ApplyDebugLocation::CreateEmpty(*this);
-    Builder.CreateStore(BlockPointer, Alloca);
+    Builder.CreateStore(!CGM.getCodeGenOpts().UseDefaultAlignment, BlockPointer, Alloca);
     BlockPointerDbgLoc = Alloca.getPointer();
   }
 
@@ -1540,7 +1545,7 @@ llvm::Function *CodeGenFunction::GenerateBlockFunction(
   if (blockDecl->capturesCXXThis()) {
     Address addr = Builder.CreateStructGEP(
         LoadBlockStruct(), blockInfo.CXXThisIndex, "block.captured-this");
-    CXXThisValue = Builder.CreateLoad(addr, "this");
+    CXXThisValue = Builder.CreateLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, addr, "this");
   }
 
   // Also force all the constant captures.
@@ -1553,7 +1558,7 @@ llvm::Function *CodeGenFunction::GenerateBlockFunction(
     Address alloca =
       CreateMemTemp(variable->getType(), align, "block.captured-const");
 
-    Builder.CreateStore(capture.getConstant(), alloca);
+    Builder.CreateStore(!CGM.getCodeGenOpts().UseDefaultAlignment, capture.getConstant(), alloca);
 
     setAddrOfLocalVar(variable, alloca);
   }
@@ -1692,7 +1697,7 @@ struct CallBlockRelease final : EHScopeStack::Cleanup {
   void Emit(CodeGenFunction &CGF, Flags flags) override {
     llvm::Value *BlockVarAddr;
     if (LoadBlockVarAddr) {
-      BlockVarAddr = CGF.Builder.CreateLoad(Addr);
+      BlockVarAddr = CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, Addr);
       BlockVarAddr = CGF.Builder.CreateBitCast(BlockVarAddr, CGF.VoidPtrTy);
     } else {
       BlockVarAddr = Addr.getPointer();
@@ -1938,12 +1943,12 @@ CodeGenFunction::GenerateCopyHelperFunction(const CGBlockInfo &blockInfo) {
   auto AL = ApplyDebugLocation::CreateArtificial(*this);
 
   Address src = GetAddrOfLocalVar(&SrcDecl);
-  src = Address(Builder.CreateLoad(src), Int8Ty, blockInfo.BlockAlign);
+  src = Address(Builder.CreateLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, src), Int8Ty, blockInfo.BlockAlign);
   src = Builder.CreateElementBitCast(src, blockInfo.StructureType,
                                      "block.source");
 
   Address dst = GetAddrOfLocalVar(&DstDecl);
-  dst = Address(Builder.CreateLoad(dst), Int8Ty, blockInfo.BlockAlign);
+  dst = Address(Builder.CreateLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, dst), Int8Ty, blockInfo.BlockAlign);
   dst =
       Builder.CreateElementBitCast(dst, blockInfo.StructureType, "block.dest");
 
@@ -1977,14 +1982,14 @@ CodeGenFunction::GenerateCopyHelperFunction(const CGBlockInfo &blockInfo) {
       break;
     }
     case BlockCaptureEntityKind::ARCStrong: {
-      llvm::Value *srcValue = Builder.CreateLoad(srcField, "blockcopy.src");
+      llvm::Value *srcValue = Builder.CreateLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, srcField, "blockcopy.src");
       // At -O0, store null into the destination field (so that the
       // storeStrong doesn't over-release) and then call storeStrong.
       // This is a workaround to not having an initStrong call.
       if (CGM.getCodeGenOpts().OptimizationLevel == 0) {
         auto *ty = cast<llvm::PointerType>(srcValue->getType());
         llvm::Value *null = llvm::ConstantPointerNull::get(ty);
-        Builder.CreateStore(null, dstField);
+        Builder.CreateStore(!CGM.getCodeGenOpts().UseDefaultAlignment, null, dstField);
         EmitARCStoreStrongCall(dstField, srcValue, true);
 
       // With optimization enabled, take advantage of the fact that
@@ -2002,7 +2007,7 @@ CodeGenFunction::GenerateCopyHelperFunction(const CGBlockInfo &blockInfo) {
       break;
     }
     case BlockCaptureEntityKind::BlockObject: {
-      llvm::Value *srcValue = Builder.CreateLoad(srcField, "blockcopy.src");
+      llvm::Value *srcValue = Builder.CreateLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, srcField, "blockcopy.src");
       srcValue = Builder.CreateBitCast(srcValue, VoidPtrTy);
       llvm::Value *dstAddr =
           Builder.CreateBitCast(dstField.getPointer(), VoidPtrTy);
@@ -2128,7 +2133,7 @@ CodeGenFunction::GenerateDestroyHelperFunction(const CGBlockInfo &blockInfo) {
   auto AL = ApplyDebugLocation::CreateArtificial(*this);
 
   Address src = GetAddrOfLocalVar(&SrcDecl);
-  src = Address(Builder.CreateLoad(src), Int8Ty, blockInfo.BlockAlign);
+  src = Address(Builder.CreateLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, src), Int8Ty, blockInfo.BlockAlign);
   src = Builder.CreateElementBitCast(src, blockInfo.StructureType, "block");
 
   CodeGenFunction::RunCleanupsScope cleanups(*this);
@@ -2169,7 +2174,7 @@ public:
     destField = CGF.Builder.CreateElementBitCast(destField, CGF.Int8Ty);
 
     srcField = CGF.Builder.CreateElementBitCast(srcField, CGF.Int8PtrTy);
-    llvm::Value *srcValue = CGF.Builder.CreateLoad(srcField);
+    llvm::Value *srcValue = CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, srcField);
 
     unsigned flags = (Flags | BLOCK_BYREF_CALLER).getBitMask();
 
@@ -2182,7 +2187,7 @@ public:
 
   void emitDispose(CodeGenFunction &CGF, Address field) override {
     field = CGF.Builder.CreateElementBitCast(field, CGF.Int8PtrTy);
-    llvm::Value *value = CGF.Builder.CreateLoad(field);
+    llvm::Value *value = CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, field);
 
     CGF.BuildBlockRelease(value, Flags | BLOCK_BYREF_CALLER, false);
   }
@@ -2223,19 +2228,19 @@ public:
     // Do a "move" by copying the value and then zeroing out the old
     // variable.
 
-    llvm::Value *value = CGF.Builder.CreateLoad(srcField);
+    llvm::Value *value = CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, srcField);
 
     llvm::Value *null =
       llvm::ConstantPointerNull::get(cast<llvm::PointerType>(value->getType()));
 
     if (CGF.CGM.getCodeGenOpts().OptimizationLevel == 0) {
-      CGF.Builder.CreateStore(null, destField);
+      CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, null, destField);
       CGF.EmitARCStoreStrongCall(destField, value, /*ignored*/ true);
       CGF.EmitARCStoreStrongCall(srcField, null, /*ignored*/ true);
       return;
     }
-    CGF.Builder.CreateStore(value, destField);
-    CGF.Builder.CreateStore(null, srcField);
+    CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, value, destField);
+    CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, null, srcField);
   }
 
   void emitDispose(CodeGenFunction &CGF, Address field) override {
@@ -2260,9 +2265,9 @@ public:
     // Do the copy with objc_retainBlock; that's all that
     // _Block_object_assign would do anyway, and we'd have to pass the
     // right arguments to make sure it doesn't get no-op'ed.
-    llvm::Value *oldValue = CGF.Builder.CreateLoad(srcField);
+    llvm::Value *oldValue = CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, srcField);
     llvm::Value *copy = CGF.EmitARCRetainBlock(oldValue, /*mandatory*/ true);
-    CGF.Builder.CreateStore(copy, destField);
+    CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, copy, destField);
   }
 
   void emitDispose(CodeGenFunction &CGF, Address field) override {
@@ -2373,7 +2378,7 @@ generateByrefCopyHelper(CodeGenFunction &CGF, const BlockByrefInfo &byrefInfo,
   if (generator.needsCopy()) {
     // dst->x
     Address destField = CGF.GetAddrOfLocalVar(&Dst);
-    destField = Address(CGF.Builder.CreateLoad(destField), CGF.Int8Ty,
+    destField = Address(CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, destField), CGF.Int8Ty,
                         byrefInfo.ByrefAlignment);
     destField = CGF.Builder.CreateElementBitCast(destField, byrefInfo.Type);
     destField =
@@ -2381,7 +2386,7 @@ generateByrefCopyHelper(CodeGenFunction &CGF, const BlockByrefInfo &byrefInfo,
 
     // src->x
     Address srcField = CGF.GetAddrOfLocalVar(&Src);
-    srcField = Address(CGF.Builder.CreateLoad(srcField), CGF.Int8Ty,
+    srcField = Address(CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, srcField), CGF.Int8Ty,
                        byrefInfo.ByrefAlignment);
     srcField = CGF.Builder.CreateElementBitCast(srcField, byrefInfo.Type);
     srcField =
@@ -2439,7 +2444,7 @@ generateByrefDisposeHelper(CodeGenFunction &CGF,
 
   if (generator.needsDispose()) {
     Address addr = CGF.GetAddrOfLocalVar(&Src);
-    addr = Address(CGF.Builder.CreateLoad(addr), CGF.Int8Ty,
+    addr = Address(CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, addr), CGF.Int8Ty,
                    byrefInfo.ByrefAlignment);
     addr = CGF.Builder.CreateElementBitCast(addr, byrefInfo.Type);
     addr = CGF.emitBlockByrefAddress(addr, byrefInfo, false, "object");
@@ -2587,7 +2592,7 @@ Address CodeGenFunction::emitBlockByrefAddress(Address baseAddr,
   // Chase the forwarding address if requested.
   if (followForward) {
     Address forwardingAddr = Builder.CreateStructGEP(baseAddr, 1, "forwarding");
-    baseAddr = Address(Builder.CreateLoad(forwardingAddr), info.Type,
+    baseAddr = Address(Builder.CreateLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, forwardingAddr), info.Type,
                        info.ByrefAlignment);
   }
 
@@ -2709,7 +2714,7 @@ void CodeGenFunction::emitByrefStructureInit(const AutoVarEmission &emission) {
   auto storeHeaderField = [&](llvm::Value *value, CharUnits fieldSize,
                               const Twine &name) {
     auto fieldAddr = Builder.CreateStructGEP(addr, nextHeaderIndex, name);
-    Builder.CreateStore(value, fieldAddr);
+    Builder.CreateStore(!CGM.getCodeGenOpts().UseDefaultAlignment, value, fieldAddr);
 
     nextHeaderIndex++;
     nextHeaderOffset += fieldSize;

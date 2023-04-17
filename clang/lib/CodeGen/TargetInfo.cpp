@@ -65,7 +65,7 @@ static ABIArgInfo coerceToIntArray(QualType Ty,
   return ABIArgInfo::getDirect(llvm::ArrayType::get(IntType, NumElements));
 }
 
-static void AssignToArrayRange(CodeGen::CGBuilderTy &Builder,
+static void AssignToArrayRange(CodeGenModule& CGM, CodeGen::CGBuilderTy &Builder,
                                llvm::Value *Array,
                                llvm::Value *Value,
                                unsigned FirstIndex,
@@ -74,7 +74,7 @@ static void AssignToArrayRange(CodeGen::CGBuilderTy &Builder,
   for (unsigned I = FirstIndex; I <= LastIndex; ++I) {
     llvm::Value *Cell =
         Builder.CreateConstInBoundsGEP1_32(Builder.getInt8Ty(), Array, I);
-    Builder.CreateAlignedStore(Value, Cell, CharUnits::One());
+    Builder.CreateAlignedStore(!CGM.getCodeGenOpts().UseDefaultAlignment, Value, Cell, CharUnits::One());
   }
 }
 
@@ -329,7 +329,7 @@ static Address emitVoidPtrDirectVAArg(CodeGenFunction &CGF,
   if (VAListAddr.getElementType() != CGF.Int8PtrTy)
     VAListAddr = CGF.Builder.CreateElementBitCast(VAListAddr, CGF.Int8PtrTy);
 
-  llvm::Value *Ptr = CGF.Builder.CreateLoad(VAListAddr, "argp.cur");
+  llvm::Value *Ptr = CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, VAListAddr, "argp.cur");
 
   // If the CC aligns values higher than the slot size, do so if needed.
   Address Addr = Address::invalid();
@@ -344,7 +344,7 @@ static Address emitVoidPtrDirectVAArg(CodeGenFunction &CGF,
   CharUnits FullDirectSize = DirectSize.alignTo(SlotSize);
   Address NextPtr =
       CGF.Builder.CreateConstInBoundsByteGEP(Addr, FullDirectSize, "argp.next");
-  CGF.Builder.CreateStore(NextPtr.getPointer(), VAListAddr);
+  CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, NextPtr.getPointer(), VAListAddr);
 
   // If the argument is smaller than a slot, and this is a big-endian
   // target, the argument will be right-adjusted in its slot.
@@ -395,7 +395,7 @@ static Address emitVoidPtrVAArg(CodeGenFunction &CGF, Address VAListAddr,
                              SlotSizeAndAlign, AllowHigherAlign);
 
   if (IsIndirect) {
-    Addr = Address(CGF.Builder.CreateLoad(Addr), ElementTy, ValueInfo.Align);
+    Addr = Address(CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, Addr), ElementTy, ValueInfo.Align);
   }
 
   return Addr;
@@ -422,8 +422,8 @@ static Address complexTempStructure(CodeGenFunction &CGF, Address VAListAddr,
   llvm::Type *EltTy = CGF.ConvertTypeForMem(CTy->getElementType());
   RealAddr = CGF.Builder.CreateElementBitCast(RealAddr, EltTy);
   ImagAddr = CGF.Builder.CreateElementBitCast(ImagAddr, EltTy);
-  llvm::Value *Real = CGF.Builder.CreateLoad(RealAddr, ".vareal");
-  llvm::Value *Imag = CGF.Builder.CreateLoad(ImagAddr, ".vaimag");
+  llvm::Value *Real = CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, RealAddr, ".vareal");
+  llvm::Value *Imag = CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, ImagAddr, ".vaimag");
 
   Address Temp = CGF.CreateMemTemp(Ty, "vacplx");
   CGF.EmitStoreOfComplex({Real, Imag}, CGF.MakeAddrLValue(Temp, Ty),
@@ -723,7 +723,7 @@ Address EmitVAArgInstr(CodeGenFunction &CGF, Address VAListAddr, QualType Ty,
     Address Temp = CGF.CreateMemTemp(Ty, "varet");
     Val = CGF.Builder.CreateVAArg(VAListAddr.getPointer(),
                                   CGF.ConvertTypeForMem(Ty));
-    CGF.Builder.CreateStore(Val, Temp);
+    CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, Val, Temp);
     return Temp;
   }
 }
@@ -2197,19 +2197,19 @@ bool X86_32TargetCodeGenInfo::initDwarfEHRegSizeTable(
   // 0-7 are the eight integer registers;  the order is different
   //   on Darwin (for EH), but the range is the same.
   // 8 is %eip.
-  AssignToArrayRange(Builder, Address, Four8, 0, 8);
+  AssignToArrayRange(CGF.CGM, Builder, Address, Four8, 0, 8);
 
   if (CGF.CGM.getTarget().getTriple().isOSDarwin()) {
     // 12-16 are st(0..4).  Not sure why we stop at 4.
     // These have size 16, which is sizeof(long double) on
     // platforms with 8-byte alignment for that type.
     llvm::Value *Sixteen8 = llvm::ConstantInt::get(CGF.Int8Ty, 16);
-    AssignToArrayRange(Builder, Address, Sixteen8, 12, 16);
+    AssignToArrayRange(CGF.CGM, Builder, Address, Sixteen8, 12, 16);
 
   } else {
     // 9 is %eflags, which doesn't get a size on Darwin for some
     // reason.
-    Builder.CreateAlignedStore(
+    Builder.CreateAlignedStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, 
         Four8, Builder.CreateConstInBoundsGEP1_32(CGF.Int8Ty, Address, 9),
                                CharUnits::One());
 
@@ -2217,7 +2217,7 @@ bool X86_32TargetCodeGenInfo::initDwarfEHRegSizeTable(
     // These have size 12, which is sizeof(long double) on
     // platforms with 4-byte alignment for that type.
     llvm::Value *Twelve8 = llvm::ConstantInt::get(CGF.Int8Ty, 12);
-    AssignToArrayRange(Builder, Address, Twelve8, 11, 16);
+    AssignToArrayRange(CGF.CGM, Builder, Address, Twelve8, 11, 16);
   }
 
   return false;
@@ -2500,7 +2500,7 @@ public:
 
     // 0-15 are the 16 integer registers.
     // 16 is %rip.
-    AssignToArrayRange(CGF.Builder, Address, Eight8, 0, 16);
+    AssignToArrayRange(CGF.CGM, CGF.Builder, Address, Eight8, 0, 16);
     return false;
   }
 
@@ -2737,7 +2737,7 @@ public:
 
     // 0-15 are the 16 integer registers.
     // 16 is %rip.
-    AssignToArrayRange(CGF.Builder, Address, Eight8, 0, 16);
+    AssignToArrayRange(CGF.CGM, CGF.Builder, Address, Eight8, 0, 16);
     return false;
   }
 
@@ -4040,7 +4040,7 @@ static Address EmitX86_64VAArgFromMemory(CodeGenFunction &CGF,
   Address overflow_arg_area_p =
       CGF.Builder.CreateStructGEP(VAListAddr, 2, "overflow_arg_area_p");
   llvm::Value *overflow_arg_area =
-    CGF.Builder.CreateLoad(overflow_arg_area_p, "overflow_arg_area");
+    CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, overflow_arg_area_p, "overflow_arg_area");
 
   // AMD64-ABI 3.5.7p5: Step 7. Align l->overflow_arg_area upwards to a 16
   // byte boundary if alignment needed by type exceeds 8 byte boundary.
@@ -4068,7 +4068,7 @@ static Address EmitX86_64VAArgFromMemory(CodeGenFunction &CGF,
       llvm::ConstantInt::get(CGF.Int32Ty, (SizeInBytes + 7)  & ~7);
   overflow_arg_area = CGF.Builder.CreateGEP(CGF.Int8Ty, overflow_arg_area,
                                             Offset, "overflow_arg_area.next");
-  CGF.Builder.CreateStore(overflow_arg_area, overflow_arg_area_p);
+  CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, overflow_arg_area, overflow_arg_area_p);
 
   // AMD64-ABI 3.5.7p5: Step 11. Return the fetched type.
   return Address(Res, LTy, Align);
@@ -4110,14 +4110,14 @@ Address X86_64ABIInfo::EmitVAArg(CodeGenFunction &CGF, Address VAListAddr,
   llvm::Value *gp_offset = nullptr, *fp_offset = nullptr;
   if (neededInt) {
     gp_offset_p = CGF.Builder.CreateStructGEP(VAListAddr, 0, "gp_offset_p");
-    gp_offset = CGF.Builder.CreateLoad(gp_offset_p, "gp_offset");
+    gp_offset = CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, gp_offset_p, "gp_offset");
     InRegs = llvm::ConstantInt::get(CGF.Int32Ty, 48 - neededInt * 8);
     InRegs = CGF.Builder.CreateICmpULE(gp_offset, InRegs, "fits_in_gp");
   }
 
   if (neededSSE) {
     fp_offset_p = CGF.Builder.CreateStructGEP(VAListAddr, 1, "fp_offset_p");
-    fp_offset = CGF.Builder.CreateLoad(fp_offset_p, "fp_offset");
+    fp_offset = CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, fp_offset_p, "fp_offset");
     llvm::Value *FitsInFP =
       llvm::ConstantInt::get(CGF.Int32Ty, 176 - neededSSE * 16);
     FitsInFP = CGF.Builder.CreateICmpULE(fp_offset, FitsInFP, "fits_in_fp");
@@ -4144,7 +4144,7 @@ Address X86_64ABIInfo::EmitVAArg(CodeGenFunction &CGF, Address VAListAddr,
   // simple assembling of a structure from scattered addresses has many more
   // loads than necessary. Can we clean this up?
   llvm::Type *LTy = CGF.ConvertTypeForMem(Ty);
-  llvm::Value *RegSaveArea = CGF.Builder.CreateLoad(
+  llvm::Value *RegSaveArea = CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, 
       CGF.Builder.CreateStructGEP(VAListAddr, 3), "reg_save_area");
 
   Address RegAddr = Address::invalid();
@@ -4170,16 +4170,16 @@ Address X86_64ABIInfo::EmitVAArg(CodeGenFunction &CGF, Address VAListAddr,
 
     // Copy the first element.
     // FIXME: Our choice of alignment here and below is probably pessimistic.
-    llvm::Value *V = CGF.Builder.CreateAlignedLoad(
+    llvm::Value *V = CGF.Builder.CreateAlignedLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, 
         TyLo, CGF.Builder.CreateBitCast(RegLoAddr, PTyLo),
         CharUnits::fromQuantity(getDataLayout().getABITypeAlignment(TyLo)));
-    CGF.Builder.CreateStore(V, CGF.Builder.CreateStructGEP(Tmp, 0));
+    CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, V, CGF.Builder.CreateStructGEP(Tmp, 0));
 
     // Copy the second element.
-    V = CGF.Builder.CreateAlignedLoad(
+    V = CGF.Builder.CreateAlignedLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, 
         TyHi, CGF.Builder.CreateBitCast(RegHiAddr, PTyHi),
         CharUnits::fromQuantity(getDataLayout().getABITypeAlignment(TyHi)));
-    CGF.Builder.CreateStore(V, CGF.Builder.CreateStructGEP(Tmp, 1));
+    CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, V, CGF.Builder.CreateStructGEP(Tmp, 1));
 
     RegAddr = CGF.Builder.CreateElementBitCast(Tmp, LTy);
   } else if (neededInt) {
@@ -4196,6 +4196,10 @@ Address X86_64ABIInfo::EmitVAArg(CodeGenFunction &CGF, Address VAListAddr,
     // register save area.
     if (TyAlign.getQuantity() > 8) {
       Address Tmp = CGF.CreateMemTemp(Ty);
+      if (!CGF.CGM.getCodeGenOpts().UseDefaultAlignment) {
+        Tmp = Tmp.withAlignment(CharUnits::One()); 
+        RegAddr = RegAddr.withAlignment(CharUnits::One()); 
+      }
       CGF.Builder.CreateMemCpy(Tmp, RegAddr, TySize, false);
       RegAddr = Tmp;
     }
@@ -4224,12 +4228,12 @@ Address X86_64ABIInfo::EmitVAArg(CodeGenFunction &CGF, Address VAListAddr,
     llvm::Value *V;
     Address Tmp = CGF.CreateMemTemp(Ty);
     Tmp = CGF.Builder.CreateElementBitCast(Tmp, ST);
-    V = CGF.Builder.CreateLoad(CGF.Builder.CreateElementBitCast(
+    V = CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, CGF.Builder.CreateElementBitCast(
         RegAddrLo, ST->getStructElementType(0)));
-    CGF.Builder.CreateStore(V, CGF.Builder.CreateStructGEP(Tmp, 0));
-    V = CGF.Builder.CreateLoad(CGF.Builder.CreateElementBitCast(
+    CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, V, CGF.Builder.CreateStructGEP(Tmp, 0));
+    V = CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, CGF.Builder.CreateElementBitCast(
         RegAddrHi, ST->getStructElementType(1)));
-    CGF.Builder.CreateStore(V, CGF.Builder.CreateStructGEP(Tmp, 1));
+    CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, V, CGF.Builder.CreateStructGEP(Tmp, 1));
 
     RegAddr = CGF.Builder.CreateElementBitCast(Tmp, LTy);
   }
@@ -4239,12 +4243,12 @@ Address X86_64ABIInfo::EmitVAArg(CodeGenFunction &CGF, Address VAListAddr,
   // l->fp_offset = l->fp_offset + num_fp * 16.
   if (neededInt) {
     llvm::Value *Offset = llvm::ConstantInt::get(CGF.Int32Ty, neededInt * 8);
-    CGF.Builder.CreateStore(CGF.Builder.CreateAdd(gp_offset, Offset),
+    CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, CGF.Builder.CreateAdd(gp_offset, Offset),
                             gp_offset_p);
   }
   if (neededSSE) {
     llvm::Value *Offset = llvm::ConstantInt::get(CGF.Int32Ty, neededSSE * 16);
-    CGF.Builder.CreateStore(CGF.Builder.CreateAdd(fp_offset, Offset),
+    CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, CGF.Builder.CreateAdd(fp_offset, Offset),
                             fp_offset_p);
   }
   CGF.EmitBranch(ContBlock);
@@ -4491,29 +4495,29 @@ static bool PPC_initDwarfEHRegSizeTable(CodeGen::CodeGenFunction &CGF,
   llvm::Value *Sixteen8 = llvm::ConstantInt::get(i8, 16);
 
   // 0-31: r0-31, the 4-byte or 8-byte general-purpose registers
-  AssignToArrayRange(Builder, Address, Is64Bit ? Eight8 : Four8, 0, 31);
+  AssignToArrayRange(CGF.CGM, Builder, Address, Is64Bit ? Eight8 : Four8, 0, 31);
 
   // 32-63: fp0-31, the 8-byte floating-point registers
-  AssignToArrayRange(Builder, Address, Eight8, 32, 63);
+  AssignToArrayRange(CGF.CGM, Builder, Address, Eight8, 32, 63);
 
   // 64-67 are various 4-byte or 8-byte special-purpose registers:
   // 64: mq
   // 65: lr
   // 66: ctr
   // 67: ap
-  AssignToArrayRange(Builder, Address, Is64Bit ? Eight8 : Four8, 64, 67);
+  AssignToArrayRange(CGF.CGM, Builder, Address, Is64Bit ? Eight8 : Four8, 64, 67);
 
   // 68-76 are various 4-byte special-purpose registers:
   // 68-75 cr0-7
   // 76: xer
-  AssignToArrayRange(Builder, Address, Four8, 68, 76);
+  AssignToArrayRange(CGF.CGM, Builder, Address, Four8, 68, 76);
 
   // 77-108: v0-31, the 16-byte vector registers
-  AssignToArrayRange(Builder, Address, Sixteen8, 77, 108);
+  AssignToArrayRange(CGF.CGM, Builder, Address, Sixteen8, 77, 108);
 
   // 109: vrsave
   // 110: vscr
-  AssignToArrayRange(Builder, Address, Is64Bit ? Eight8 : Four8, 109, 110);
+  AssignToArrayRange(CGF.CGM, Builder, Address, Is64Bit ? Eight8 : Four8, 109, 110);
 
   // AIX does not utilize the rest of the registers.
   if (IsAIX)
@@ -4522,7 +4526,7 @@ static bool PPC_initDwarfEHRegSizeTable(CodeGen::CodeGenFunction &CGF,
   // 111: spe_acc
   // 112: spefscr
   // 113: sfp
-  AssignToArrayRange(Builder, Address, Is64Bit ? Eight8 : Four8, 111, 113);
+  AssignToArrayRange(CGF.CGM, Builder, Address, Is64Bit ? Eight8 : Four8, 111, 113);
 
   if (!Is64Bit)
     return false;
@@ -4533,7 +4537,7 @@ static bool PPC_initDwarfEHRegSizeTable(CodeGen::CodeGenFunction &CGF,
   // 114: tfhar
   // 115: tfiar
   // 116: texasr
-  AssignToArrayRange(Builder, Address, Eight8, 114, 116);
+  AssignToArrayRange(CGF.CGM, Builder, Address, Eight8, 114, 116);
 
   return false;
 }
@@ -4847,7 +4851,7 @@ Address PPC32_SVR4_ABIInfo::EmitVAArg(CodeGenFunction &CGF, Address VAList,
     NumRegsAddr = Builder.CreateStructGEP(VAList, 1, "fpr");
   }
 
-  llvm::Value *NumRegs = Builder.CreateLoad(NumRegsAddr, "numUsedRegs");
+  llvm::Value *NumRegs = Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, NumRegsAddr, "numUsedRegs");
 
   // "Align" the register count when TY is i64.
   if (isI64 || (isF64 && IsSoftFloatABI)) {
@@ -4873,7 +4877,7 @@ Address PPC32_SVR4_ABIInfo::EmitVAArg(CodeGenFunction &CGF, Address VAList,
     CGF.EmitBlock(UsingRegs);
 
     Address RegSaveAreaPtr = Builder.CreateStructGEP(VAList, 4);
-    RegAddr = Address(Builder.CreateLoad(RegSaveAreaPtr), CGF.Int8Ty,
+    RegAddr = Address(Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, RegSaveAreaPtr), CGF.Int8Ty,
                       CharUnits::fromQuantity(8));
     assert(RegAddr.getElementType() == CGF.Int8Ty);
 
@@ -4897,7 +4901,7 @@ Address PPC32_SVR4_ABIInfo::EmitVAArg(CodeGenFunction &CGF, Address VAList,
     NumRegs =
       Builder.CreateAdd(NumRegs,
                         Builder.getInt8((isI64 || (isF64 && IsSoftFloatABI)) ? 2 : 1));
-    Builder.CreateStore(NumRegs, NumRegsAddr);
+    Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, NumRegs, NumRegsAddr);
 
     CGF.EmitBranch(Cont);
   }
@@ -4907,7 +4911,7 @@ Address PPC32_SVR4_ABIInfo::EmitVAArg(CodeGenFunction &CGF, Address VAList,
   {
     CGF.EmitBlock(UsingOverflow);
 
-    Builder.CreateStore(Builder.getInt8(OverflowLimit), NumRegsAddr);
+    Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, Builder.getInt8(OverflowLimit), NumRegsAddr);
 
     // Everything in the overflow area is rounded up to a size of at least 4.
     CharUnits OverflowAreaAlign = CharUnits::fromQuantity(4);
@@ -4922,7 +4926,7 @@ Address PPC32_SVR4_ABIInfo::EmitVAArg(CodeGenFunction &CGF, Address VAList,
 
     Address OverflowAreaAddr = Builder.CreateStructGEP(VAList, 3);
     Address OverflowArea =
-        Address(Builder.CreateLoad(OverflowAreaAddr, "argp.cur"), CGF.Int8Ty,
+        Address(Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, OverflowAreaAddr, "argp.cur"), CGF.Int8Ty,
                 OverflowAreaAlign);
     // Round up address of argument to alignment
     CharUnits Align = CGF.getContext().getTypeAlignInChars(Ty);
@@ -4936,7 +4940,7 @@ Address PPC32_SVR4_ABIInfo::EmitVAArg(CodeGenFunction &CGF, Address VAList,
 
     // Increase the overflow area.
     OverflowArea = Builder.CreateConstInBoundsByteGEP(OverflowArea, Size);
-    Builder.CreateStore(OverflowArea.getPointer(), OverflowAreaAddr);
+    Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, OverflowArea.getPointer(), OverflowAreaAddr);
     CGF.EmitBranch(Cont);
   }
 
@@ -4948,7 +4952,7 @@ Address PPC32_SVR4_ABIInfo::EmitVAArg(CodeGenFunction &CGF, Address VAList,
 
   // Load the pointer if the argument was passed indirectly.
   if (isIndirect) {
-    Result = Address(Builder.CreateLoad(Result, "aggr"), ElementTy,
+    Result = Address(Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, Result, "aggr"), ElementTy,
                      getContext().getTypeAlignInChars(Ty));
   }
 
@@ -6034,13 +6038,13 @@ Address AArch64ABIInfo::EmitAAPCSVAArg(Address VAListAddr, QualType Ty,
   if (!IsFPR) {
     // 3 is the field number of __gr_offs
     reg_offs_p = CGF.Builder.CreateStructGEP(VAListAddr, 3, "gr_offs_p");
-    reg_offs = CGF.Builder.CreateLoad(reg_offs_p, "gr_offs");
+    reg_offs = CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, reg_offs_p, "gr_offs");
     reg_top_index = 1; // field number for __gr_top
     RegSize = llvm::alignTo(RegSize, 8);
   } else {
     // 4 is the field number of __vr_offs.
     reg_offs_p = CGF.Builder.CreateStructGEP(VAListAddr, 4, "vr_offs_p");
-    reg_offs = CGF.Builder.CreateLoad(reg_offs_p, "vr_offs");
+    reg_offs = CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, reg_offs_p, "vr_offs");
     reg_top_index = 2; // field number for __vr_top
     RegSize = 16 * NumRegs;
   }
@@ -6084,7 +6088,7 @@ Address AArch64ABIInfo::EmitAAPCSVAArg(Address VAListAddr, QualType Ty,
   llvm::Value *NewOffset = nullptr;
   NewOffset = CGF.Builder.CreateAdd(
       reg_offs, llvm::ConstantInt::get(CGF.Int32Ty, RegSize), "new_reg_offs");
-  CGF.Builder.CreateStore(NewOffset, reg_offs_p);
+  CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, NewOffset, reg_offs_p);
 
   // Now we're in a position to decide whether this argument really was in
   // registers or not.
@@ -6105,7 +6109,7 @@ Address AArch64ABIInfo::EmitAAPCSVAArg(Address VAListAddr, QualType Ty,
   llvm::Value *reg_top = nullptr;
   Address reg_top_p =
       CGF.Builder.CreateStructGEP(VAListAddr, reg_top_index, "reg_top_p");
-  reg_top = CGF.Builder.CreateLoad(reg_top_p, "reg_top");
+  reg_top = CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, reg_top_p, "reg_top");
   Address BaseAddr(CGF.Builder.CreateInBoundsGEP(CGF.Int8Ty, reg_top, reg_offs),
                    CGF.Int8Ty, CharUnits::fromQuantity(IsFPR ? 16 : 8));
   Address RegAddr = Address::invalid();
@@ -6146,8 +6150,8 @@ Address AArch64ABIInfo::EmitAAPCSVAArg(Address VAListAddr, QualType Ty,
 
       Address StoreAddr = CGF.Builder.CreateConstArrayGEP(Tmp, i);
 
-      llvm::Value *Elem = CGF.Builder.CreateLoad(LoadAddr);
-      CGF.Builder.CreateStore(Elem, StoreAddr);
+      llvm::Value *Elem = CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, LoadAddr);
+      CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, Elem, StoreAddr);
     }
 
     RegAddr = CGF.Builder.CreateElementBitCast(Tmp, MemTy);
@@ -6174,7 +6178,7 @@ Address AArch64ABIInfo::EmitAAPCSVAArg(Address VAListAddr, QualType Ty,
   CGF.EmitBlock(OnStackBlock);
 
   Address stack_p = CGF.Builder.CreateStructGEP(VAListAddr, 0, "stack_p");
-  llvm::Value *OnStackPtr = CGF.Builder.CreateLoad(stack_p, "stack");
+  llvm::Value *OnStackPtr = CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, stack_p, "stack");
 
   // Again, stack arguments may need realignment. In this case both integer and
   // floating-point ones might be affected.
@@ -6208,7 +6212,7 @@ Address AArch64ABIInfo::EmitAAPCSVAArg(Address VAListAddr, QualType Ty,
       CGF.Int8Ty, OnStackPtr, StackSizeC, "new_stack");
 
   // Write the new value of __stack for the next call to va_arg
-  CGF.Builder.CreateStore(NewStack, stack_p);
+  CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, NewStack, stack_p);
 
   if (CGF.CGM.getDataLayout().isBigEndian() && !isAggregateTypeForABI(Ty) &&
       TySize < StackSlotSize) {
@@ -6229,7 +6233,7 @@ Address AArch64ABIInfo::EmitAAPCSVAArg(Address VAListAddr, QualType Ty,
                                  OnStackBlock, "vaargs.addr");
 
   if (IsIndirect)
-    return Address(CGF.Builder.CreateLoad(ResAddr, "vaarg.addr"), ElementTy,
+    return Address(CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, ResAddr, "vaarg.addr"), ElementTy,
                    TyAlign);
 
   return ResAddr;
@@ -6248,7 +6252,7 @@ Address AArch64ABIInfo::EmitDarwinVAArg(Address VAListAddr, QualType Ty,
 
   // Empty records are ignored for parameter passing purposes.
   if (isEmptyRecord(getContext(), Ty, true)) {
-    Address Addr = Address(CGF.Builder.CreateLoad(VAListAddr, "ap.cur"),
+    Address Addr = Address(CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, VAListAddr, "ap.cur"),
                            getVAListElementType(CGF), SlotSize);
     Addr = CGF.Builder.CreateElementBitCast(Addr, CGF.ConvertTypeForMem(Ty));
     return Addr;
@@ -6404,7 +6408,7 @@ public:
     llvm::Value *Four8 = llvm::ConstantInt::get(CGF.Int8Ty, 4);
 
     // 0-15 are the 16 integer registers.
-    AssignToArrayRange(CGF.Builder, Address, Four8, 0, 15);
+    AssignToArrayRange(CGF.CGM, CGF.Builder, Address, Four8, 0, 15);
     return false;
   }
 
@@ -7048,7 +7052,7 @@ Address ARMABIInfo::EmitVAArg(CodeGenFunction &CGF, Address VAListAddr,
   // Empty records are ignored for parameter passing purposes.
   if (isEmptyRecord(getContext(), Ty, true)) {
     VAListAddr = CGF.Builder.CreateElementBitCast(VAListAddr, CGF.Int8PtrTy);
-    auto *Load = CGF.Builder.CreateLoad(VAListAddr);
+    auto *Load = CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, VAListAddr);
     Address Addr = Address(Load, CGF.Int8Ty, SlotSize);
     return CGF.Builder.CreateElementBitCast(Addr, CGF.ConvertTypeForMem(Ty));
   }
@@ -7619,7 +7623,7 @@ Address SystemZABIInfo::EmitVAArg(CodeGenFunction &CGF, Address VAListAddr,
     Address OverflowArgAreaPtr =
         CGF.Builder.CreateStructGEP(VAListAddr, 2, "overflow_arg_area_ptr");
     Address OverflowArgArea =
-        Address(CGF.Builder.CreateLoad(OverflowArgAreaPtr, "overflow_arg_area"),
+        Address(CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, OverflowArgAreaPtr, "overflow_arg_area"),
                 CGF.Int8Ty, TyInfo.Align);
     Address MemAddr =
         CGF.Builder.CreateElementBitCast(OverflowArgArea, DirectTy, "mem_addr");
@@ -7628,7 +7632,7 @@ Address SystemZABIInfo::EmitVAArg(CodeGenFunction &CGF, Address VAListAddr,
     llvm::Value *NewOverflowArgArea = CGF.Builder.CreateGEP(
         OverflowArgArea.getElementType(), OverflowArgArea.getPointer(),
         PaddedSizeV, "overflow_arg_area");
-    CGF.Builder.CreateStore(NewOverflowArgArea, OverflowArgAreaPtr);
+    CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, NewOverflowArgArea, OverflowArgAreaPtr);
 
     return MemAddr;
   }
@@ -7651,7 +7655,7 @@ Address SystemZABIInfo::EmitVAArg(CodeGenFunction &CGF, Address VAListAddr,
 
   Address RegCountPtr =
       CGF.Builder.CreateStructGEP(VAListAddr, RegCountField, "reg_count_ptr");
-  llvm::Value *RegCount = CGF.Builder.CreateLoad(RegCountPtr, "reg_count");
+  llvm::Value *RegCount = CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, RegCountPtr, "reg_count");
   llvm::Value *MaxRegsV = llvm::ConstantInt::get(IndexTy, MaxRegs);
   llvm::Value *InRegs = CGF.Builder.CreateICmpULT(RegCount, MaxRegsV,
                                                  "fits_in_regs");
@@ -7675,7 +7679,7 @@ Address SystemZABIInfo::EmitVAArg(CodeGenFunction &CGF, Address VAListAddr,
   Address RegSaveAreaPtr =
       CGF.Builder.CreateStructGEP(VAListAddr, 3, "reg_save_area_ptr");
   llvm::Value *RegSaveArea =
-      CGF.Builder.CreateLoad(RegSaveAreaPtr, "reg_save_area");
+      CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, RegSaveAreaPtr, "reg_save_area");
   Address RawRegAddr(
       CGF.Builder.CreateGEP(CGF.Int8Ty, RegSaveArea, RegOffset, "raw_reg_addr"),
       CGF.Int8Ty, PaddedSize);
@@ -7686,7 +7690,7 @@ Address SystemZABIInfo::EmitVAArg(CodeGenFunction &CGF, Address VAListAddr,
   llvm::Value *One = llvm::ConstantInt::get(IndexTy, 1);
   llvm::Value *NewRegCount =
     CGF.Builder.CreateAdd(RegCount, One, "reg_count");
-  CGF.Builder.CreateStore(NewRegCount, RegCountPtr);
+  CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, NewRegCount, RegCountPtr);
   CGF.EmitBranch(ContBlock);
 
   // Emit code to load the value if it was passed in memory.
@@ -7696,7 +7700,7 @@ Address SystemZABIInfo::EmitVAArg(CodeGenFunction &CGF, Address VAListAddr,
   Address OverflowArgAreaPtr =
       CGF.Builder.CreateStructGEP(VAListAddr, 2, "overflow_arg_area_ptr");
   Address OverflowArgArea =
-      Address(CGF.Builder.CreateLoad(OverflowArgAreaPtr, "overflow_arg_area"),
+      Address(CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, OverflowArgAreaPtr, "overflow_arg_area"),
               CGF.Int8Ty, PaddedSize);
   Address RawMemAddr =
       CGF.Builder.CreateConstByteGEP(OverflowArgArea, Padding, "raw_mem_addr");
@@ -7708,7 +7712,7 @@ Address SystemZABIInfo::EmitVAArg(CodeGenFunction &CGF, Address VAListAddr,
     CGF.Builder.CreateGEP(OverflowArgArea.getElementType(),
                           OverflowArgArea.getPointer(), PaddedSizeV,
                           "overflow_arg_area");
-  CGF.Builder.CreateStore(NewOverflowArgArea, OverflowArgAreaPtr);
+  CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, NewOverflowArgArea, OverflowArgAreaPtr);
   CGF.EmitBranch(ContBlock);
 
   // Return the appropriate result.
@@ -7717,7 +7721,7 @@ Address SystemZABIInfo::EmitVAArg(CodeGenFunction &CGF, Address VAListAddr,
                                  "va_arg.addr");
 
   if (IsIndirect)
-    ResAddr = Address(CGF.Builder.CreateLoad(ResAddr, "indirect_arg"), ArgTy,
+    ResAddr = Address(CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, ResAddr, "indirect_arg"), ArgTy,
                       TyInfo.Align);
 
   return ResAddr;
@@ -8229,7 +8233,7 @@ Address MipsABIInfo::EmitVAArg(CodeGenFunction &CGF, Address VAListAddr,
   // TODO: can we just use a pointer into a subset of the original slot?
   if (DidPromote) {
     Address Temp = CGF.CreateMemTemp(OrigTy, "vaarg.promotion-temp");
-    llvm::Value *Promoted = CGF.Builder.CreateLoad(Addr);
+    llvm::Value *Promoted = CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, Addr);
 
     // Truncate down to the right width.
     llvm::Type *IntTy = (OrigTy->isIntegerType() ? Temp.getElementType()
@@ -8238,7 +8242,7 @@ Address MipsABIInfo::EmitVAArg(CodeGenFunction &CGF, Address VAListAddr,
     if (OrigTy->isPointerType())
       V = CGF.Builder.CreateIntToPtr(V, Temp.getElementType());
 
-    CGF.Builder.CreateStore(V, Temp);
+    CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, V, Temp);
     Addr = Temp;
   }
 
@@ -8269,7 +8273,7 @@ MIPSTargetCodeGenInfo::initDwarfEHRegSizeTable(CodeGen::CodeGenFunction &CGF,
   // 32-63 are the floating-point registers, $f0 - $f31.
   // 64 and 65 are the multiply/divide registers, $hi and $lo.
   // 66 is the (notional, I think) register for signal-handler return.
-  AssignToArrayRange(CGF.Builder, Address, Four8, 0, 65);
+  AssignToArrayRange(CGF.CGM, CGF.Builder, Address, Four8, 0, 65);
 
   // 67-74 are the floating-point status registers, $fcc0 - $fcc7.
   // They are one bit wide and ignored here.
@@ -8279,7 +8283,7 @@ MIPSTargetCodeGenInfo::initDwarfEHRegSizeTable(CodeGen::CodeGenFunction &CGF,
   // 112-143 are the coprocessor 2 registers, $c2r0 - $c2r31.
   // 144-175 are the coprocessor 3 registers, $c3r0 - $c3r31.
   // 176-181 are the DSP accumulator registers.
-  AssignToArrayRange(CGF.Builder, Address, Four8, 80, 181);
+  AssignToArrayRange(CGF.CGM, CGF.Builder, Address, Four8, 80, 181);
   return false;
 }
 
@@ -8688,7 +8692,7 @@ Address HexagonABIInfo::EmitVAArgFromMemory(CodeGenFunction &CGF,
   // Load the overflow area pointer.
   Address __overflow_area_pointer_p =
       CGF.Builder.CreateStructGEP(VAListAddr, 2, "__overflow_area_pointer_p");
-  llvm::Value *__overflow_area_pointer = CGF.Builder.CreateLoad(
+  llvm::Value *__overflow_area_pointer = CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, 
       __overflow_area_pointer_p, "__overflow_area_pointer");
 
   uint64_t Align = CGF.getContext().getTypeAlign(Ty) / 8;
@@ -8728,7 +8732,7 @@ Address HexagonABIInfo::EmitVAArgFromMemory(CodeGenFunction &CGF,
       CGF.Int8Ty, __overflow_area_pointer,
       llvm::ConstantInt::get(CGF.Int32Ty, Offset),
       "__overflow_area_pointer.next");
-  CGF.Builder.CreateStore(__overflow_area_pointer, __overflow_area_pointer_p);
+  CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, __overflow_area_pointer, __overflow_area_pointer_p);
 
   return AddrTyped;
 }
@@ -8740,7 +8744,7 @@ Address HexagonABIInfo::EmitVAArgForHexagon(CodeGenFunction &CGF,
   llvm::Type *BP = CGF.Int8PtrTy;
   CGBuilderTy &Builder = CGF.Builder;
   Address VAListAddrAsBPP = Builder.CreateElementBitCast(VAListAddr, BP, "ap");
-  llvm::Value *Addr = Builder.CreateLoad(VAListAddrAsBPP, "ap.cur");
+  llvm::Value *Addr = Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, VAListAddrAsBPP, "ap.cur");
   // Handle address alignment for type alignment > 32 bits
   uint64_t TyAlign = CGF.getContext().getTypeAlign(Ty) / 8;
   if (TyAlign > 4) {
@@ -8757,7 +8761,7 @@ Address HexagonABIInfo::EmitVAArgForHexagon(CodeGenFunction &CGF,
   uint64_t Offset = llvm::alignTo(CGF.getContext().getTypeSize(Ty) / 8, 4);
   llvm::Value *NextAddr = Builder.CreateGEP(
       CGF.Int8Ty, Addr, llvm::ConstantInt::get(CGF.Int32Ty, Offset), "ap.next");
-  Builder.CreateStore(NextAddr, VAListAddrAsBPP);
+  Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, NextAddr, VAListAddrAsBPP);
 
   return AddrTyped;
 }
@@ -8794,13 +8798,13 @@ Address HexagonABIInfo::EmitVAArgForHexagonLinux(CodeGenFunction &CGF,
   // Load the current saved register area pointer.
   Address __current_saved_reg_area_pointer_p = CGF.Builder.CreateStructGEP(
       VAListAddr, 0, "__current_saved_reg_area_pointer_p");
-  llvm::Value *__current_saved_reg_area_pointer = CGF.Builder.CreateLoad(
+  llvm::Value *__current_saved_reg_area_pointer = CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, 
       __current_saved_reg_area_pointer_p, "__current_saved_reg_area_pointer");
 
   // Load the saved register area end pointer.
   Address __saved_reg_area_end_pointer_p = CGF.Builder.CreateStructGEP(
       VAListAddr, 1, "__saved_reg_area_end_pointer_p");
-  llvm::Value *__saved_reg_area_end_pointer = CGF.Builder.CreateLoad(
+  llvm::Value *__saved_reg_area_end_pointer = CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, 
       __saved_reg_area_end_pointer_p, "__saved_reg_area_end_pointer");
 
   // If the size of argument is > 4 bytes, check if the stack
@@ -8846,7 +8850,7 @@ Address HexagonABIInfo::EmitVAArgForHexagonLinux(CodeGenFunction &CGF,
   llvm::Value *__saved_reg_area_p = CGF.Builder.CreateBitCast(
       __current_saved_reg_area_pointer, llvm::PointerType::getUnqual(PTy));
 
-  CGF.Builder.CreateStore(__new_saved_reg_area_pointer,
+  CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, __new_saved_reg_area_pointer,
                           __current_saved_reg_area_pointer_p);
 
   CGF.EmitBranch(ContBlock);
@@ -8858,7 +8862,7 @@ Address HexagonABIInfo::EmitVAArgForHexagonLinux(CodeGenFunction &CGF,
   // Load the overflow area pointer
   Address __overflow_area_pointer_p =
       CGF.Builder.CreateStructGEP(VAListAddr, 2, "__overflow_area_pointer_p");
-  llvm::Value *__overflow_area_pointer = CGF.Builder.CreateLoad(
+  llvm::Value *__overflow_area_pointer = CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, 
       __overflow_area_pointer_p, "__overflow_area_pointer");
 
   // Align the overflow area pointer according to the alignment of the argument
@@ -8888,10 +8892,10 @@ Address HexagonABIInfo::EmitVAArgForHexagonLinux(CodeGenFunction &CGF,
       llvm::ConstantInt::get(CGF.Int32Ty, ArgSize),
       "__overflow_area_pointer.next");
 
-  CGF.Builder.CreateStore(__new_overflow_area_pointer,
+  CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, __new_overflow_area_pointer,
                           __overflow_area_pointer_p);
 
-  CGF.Builder.CreateStore(__new_overflow_area_pointer,
+  CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, __new_overflow_area_pointer,
                           __current_saved_reg_area_pointer_p);
 
   // Bitcast the overflow area pointer to the type of argument.
@@ -9824,7 +9828,7 @@ Address SparcV9ABIInfo::EmitVAArg(CodeGenFunction &CGF, Address VAListAddr,
   CharUnits SlotSize = CharUnits::fromQuantity(8);
 
   CGBuilderTy &Builder = CGF.Builder;
-  Address Addr = Address(Builder.CreateLoad(VAListAddr, "ap.cur"),
+  Address Addr = Address(Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, VAListAddr, "ap.cur"),
                          getVAListElementType(CGF), SlotSize);
   llvm::Type *ArgPtrTy = llvm::PointerType::getUnqual(ArgTy);
 
@@ -9856,7 +9860,7 @@ Address SparcV9ABIInfo::EmitVAArg(CodeGenFunction &CGF, Address VAListAddr,
   case ABIArgInfo::IndirectAliased:
     Stride = SlotSize;
     ArgAddr = Builder.CreateElementBitCast(Addr, ArgPtrTy, "indirect");
-    ArgAddr = Address(Builder.CreateLoad(ArgAddr, "indirect.arg"), ArgTy,
+    ArgAddr = Address(Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, ArgAddr, "indirect.arg"), ArgTy,
                       TypeInfo.Align);
     break;
 
@@ -9866,7 +9870,7 @@ Address SparcV9ABIInfo::EmitVAArg(CodeGenFunction &CGF, Address VAListAddr,
 
   // Update VAList.
   Address NextPtr = Builder.CreateConstInBoundsByteGEP(Addr, Stride, "ap.next");
-  Builder.CreateStore(NextPtr.getPointer(), VAListAddr);
+  Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, NextPtr.getPointer(), VAListAddr);
 
   return Builder.CreateElementBitCast(ArgAddr, ArgTy, "arg.addr");
 }
@@ -9917,10 +9921,10 @@ SparcV9TargetCodeGenInfo::initDwarfEHRegSizeTable(CodeGen::CodeGenFunction &CGF,
   llvm::Value *Eight8 = llvm::ConstantInt::get(i8, 8);
 
   // 0-31: the 8-byte general-purpose registers
-  AssignToArrayRange(Builder, Address, Eight8, 0, 31);
+  AssignToArrayRange(CGF.CGM, Builder, Address, Eight8, 0, 31);
 
   // 32-63: f0-31, the 4-byte floating-point registers
-  AssignToArrayRange(Builder, Address, Four8, 32, 63);
+  AssignToArrayRange(CGF.CGM, Builder, Address, Four8, 32, 63);
 
   //   Y   = 64
   //   PSR = 65
@@ -9930,10 +9934,10 @@ SparcV9TargetCodeGenInfo::initDwarfEHRegSizeTable(CodeGen::CodeGenFunction &CGF,
   //   NPC = 69
   //   FSR = 70
   //   CSR = 71
-  AssignToArrayRange(Builder, Address, Eight8, 64, 71);
+  AssignToArrayRange(CGF.CGM, Builder, Address, Eight8, 64, 71);
 
   // 72-87: d0-15, the 8-byte floating-point registers
-  AssignToArrayRange(Builder, Address, Eight8, 72, 87);
+  AssignToArrayRange(CGF.CGM, Builder, Address, Eight8, 72, 87);
 
   return false;
 }
@@ -10202,7 +10206,7 @@ Address XCoreABIInfo::EmitVAArg(CodeGenFunction &CGF, Address VAListAddr,
 
   // Get the VAList.
   CharUnits SlotSize = CharUnits::fromQuantity(4);
-  Address AP = Address(Builder.CreateLoad(VAListAddr),
+  Address AP = Address(Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, VAListAddr),
                        getVAListElementType(CGF), SlotSize);
 
   // Handle the argument.
@@ -10234,7 +10238,7 @@ Address XCoreABIInfo::EmitVAArg(CodeGenFunction &CGF, Address VAListAddr,
   case ABIArgInfo::Indirect:
   case ABIArgInfo::IndirectAliased:
     Val = Builder.CreateElementBitCast(AP, ArgPtrTy);
-    Val = Address(Builder.CreateLoad(Val), ArgTy, TypeAlign);
+    Val = Address(Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, Val), ArgTy, TypeAlign);
     ArgSize = SlotSize;
     break;
   }
@@ -10242,7 +10246,7 @@ Address XCoreABIInfo::EmitVAArg(CodeGenFunction &CGF, Address VAListAddr,
   // Increment the VAList.
   if (!ArgSize.isZero()) {
     Address APN = Builder.CreateConstInBoundsByteGEP(AP, ArgSize);
-    Builder.CreateStore(APN.getPointer(), VAListAddr);
+    Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, APN.getPointer(), VAListAddr);
   }
 
   return Val;
@@ -11270,7 +11274,7 @@ Address RISCVABIInfo::EmitVAArg(CodeGenFunction &CGF, Address VAListAddr,
 
   // Empty records are ignored for parameter passing purposes.
   if (isEmptyRecord(getContext(), Ty, true)) {
-    Address Addr = Address(CGF.Builder.CreateLoad(VAListAddr),
+    Address Addr = Address(CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, VAListAddr),
                            getVAListElementType(CGF), SlotSize);
     Addr = CGF.Builder.CreateElementBitCast(Addr, CGF.ConvertTypeForMem(Ty));
     return Addr;
@@ -11427,7 +11431,7 @@ Address CSKYABIInfo::EmitVAArg(CodeGenFunction &CGF, Address VAListAddr,
 
   // Empty records are ignored for parameter passing purposes.
   if (isEmptyRecord(getContext(), Ty, true)) {
-    Address Addr = Address(CGF.Builder.CreateLoad(VAListAddr),
+    Address Addr = Address(CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, VAListAddr),
                            getVAListElementType(CGF), SlotSize);
     Addr = CGF.Builder.CreateElementBitCast(Addr, CGF.ConvertTypeForMem(Ty));
     return Addr;

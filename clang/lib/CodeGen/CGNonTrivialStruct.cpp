@@ -326,7 +326,7 @@ static std::array<Address, N> getParamAddrs(std::index_sequence<Ints...> IntSeq,
                                             FunctionArgList Args,
                                             CodeGenFunction *CGF) {
   return std::array<Address, N>{
-      {Address(CGF->Builder.CreateLoad(CGF->GetAddrOfLocalVar(Args[Ints])),
+      {Address(CGF->Builder.CreateLoad(!CGF->CGM.getCodeGenOpts().UseDefaultAlignment, CGF->GetAddrOfLocalVar(Args[Ints])),
                CGF->VoidPtrTy, Alignments[Ints])...}};
 }
 
@@ -529,6 +529,10 @@ struct GenBinaryFunc : CopyStructVisitor<Derived, IsMove>,
           this->CGF->Builder.CreateElementBitCast(DstAddr, this->CGF->Int8Ty);
       SrcAddr =
           this->CGF->Builder.CreateElementBitCast(SrcAddr, this->CGF->Int8Ty);
+      if (!this->CGF->CGM.getCodeGenOpts().UseDefaultAlignment) {
+        DstAddr = DstAddr.withAlignment(CharUnits::One()); 
+        SrcAddr = SrcAddr.withAlignment(CharUnits::One()); 
+      }
       this->CGF->Builder.CreateMemCpy(DstAddr, SrcAddr, SizeVal, false);
     } else {
       llvm::Type *Ty = llvm::Type::getIntNTy(
@@ -536,8 +540,8 @@ struct GenBinaryFunc : CopyStructVisitor<Derived, IsMove>,
           Size.getQuantity() * this->CGF->getContext().getCharWidth());
       DstAddr = this->CGF->Builder.CreateElementBitCast(DstAddr, Ty);
       SrcAddr = this->CGF->Builder.CreateElementBitCast(SrcAddr, Ty);
-      llvm::Value *SrcVal = this->CGF->Builder.CreateLoad(SrcAddr, false);
-      this->CGF->Builder.CreateStore(SrcVal, DstAddr, false);
+      llvm::Value *SrcVal = this->CGF->Builder.CreateLoad(!this->CGF->CGM.getCodeGenOpts().UseDefaultAlignment, SrcAddr, false);
+      this->CGF->Builder.CreateStore(!this->CGF->CGM.getCodeGenOpts().UseDefaultAlignment, SrcVal, DstAddr, false);
     }
 
     this->Start = this->End = CharUnits::Zero();
@@ -666,7 +670,7 @@ struct GenDefaultInitialize
     llvm::Constant *SizeVal = CGF->Builder.getInt64(Size.getQuantity());
     Address DstAddr = getAddrWithOffset(Addrs[DstIdx], CurStructOffset, FD);
     Address Loc = CGF->Builder.CreateElementBitCast(DstAddr, CGF->Int8Ty);
-    CGF->Builder.CreateMemSet(Loc, CGF->Builder.getInt8(0), SizeVal,
+    CGF->Builder.CreateMemSet(CGF->CGM.getCodeGenOpts().UseDefaultAlignment ? Loc : Loc.withAlignment(CharUnits::One()), CGF->Builder.getInt8(0), SizeVal,
                               IsVolatile);
   }
 

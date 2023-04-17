@@ -832,7 +832,7 @@ void CodeGenFunction::EmitTypeCheck(TypeCheckKind TCK, SourceLocation Loc,
       llvm::Type *VPtrTy = llvm::PointerType::get(IntPtrTy, 0);
       Address VPtrAddr(Builder.CreateBitCast(Ptr, VPtrTy), IntPtrTy,
                        getPointerAlign());
-      llvm::Value *VPtrVal = Builder.CreateLoad(VPtrAddr);
+      llvm::Value *VPtrVal = Builder.CreateLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, VPtrAddr);
       llvm::Value *High = Builder.CreateZExt(VPtrVal, Int64Ty);
 
       llvm::Value *Hash = emitHash16Bytes(Builder, Low, High);
@@ -847,7 +847,7 @@ void CodeGenFunction::EmitTypeCheck(TypeCheckKind TCK, SourceLocation Loc,
                                             llvm::ConstantInt::get(IntPtrTy,
                                                                    CacheSize-1));
       llvm::Value *Indices[] = { Builder.getInt32(0), Slot };
-      llvm::Value *CacheVal = Builder.CreateAlignedLoad(
+      llvm::Value *CacheVal = Builder.CreateAlignedLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, 
           IntPtrTy, Builder.CreateInBoundsGEP(HashTable, Cache, Indices),
           getPointerAlign());
 
@@ -1750,7 +1750,7 @@ llvm::Value *CodeGenFunction::EmitLoadOfScalar(Address Addr, bool Volatile,
       unsigned ValNumElems =
           cast<llvm::FixedVectorType>(ValTy)->getNumElements();
       // Load the `iP` storage object (P is the padded vector size).
-      auto *RawIntV = Builder.CreateLoad(Addr, Volatile, "load_bits");
+      auto *RawIntV = Builder.CreateLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, Addr, Volatile, "load_bits");
       const auto *RawIntTy = RawIntV->getType();
       assert(RawIntTy->isIntegerTy() && "compressed iN storage for bitvectors");
       // Bitcast iP --> <P x i1>.
@@ -1774,7 +1774,7 @@ llvm::Value *CodeGenFunction::EmitLoadOfScalar(Address Addr, bool Volatile,
           llvm::FixedVectorType::get(VTy->getElementType(), 4);
       Address Cast = Builder.CreateElementBitCast(Addr, vec4Ty, "castToVec4");
       // Now load value.
-      llvm::Value *V = Builder.CreateLoad(Cast, Volatile, "loadVec4");
+      llvm::Value *V = Builder.CreateLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, Cast, Volatile, "loadVec4");
 
       // Shuffle vector to get vec3.
       V = Builder.CreateShuffleVector(V, ArrayRef<int>{0, 1, 2}, "extractVec");
@@ -1789,7 +1789,7 @@ llvm::Value *CodeGenFunction::EmitLoadOfScalar(Address Addr, bool Volatile,
     return EmitAtomicLoad(AtomicLValue, Loc).getScalarVal();
   }
 
-  llvm::LoadInst *Load = Builder.CreateLoad(Addr, Volatile);
+  llvm::LoadInst *Load = Builder.CreateLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, Addr, Volatile);
   if (isNontemporal) {
     llvm::MDNode *Node = llvm::MDNode::get(
         Load->getContext(), llvm::ConstantAsMetadata::get(Builder.getInt32(1)));
@@ -1919,7 +1919,7 @@ void CodeGenFunction::EmitStoreOfScalar(llvm::Value *Value, Address Addr,
     return;
   }
 
-  llvm::StoreInst *Store = Builder.CreateStore(Value, Addr, Volatile);
+  llvm::StoreInst *Store = Builder.CreateStore(!CGM.getCodeGenOpts().UseDefaultAlignment, Value, Addr, Volatile);
   if (isNontemporal) {
     llvm::MDNode *Node =
         llvm::MDNode::get(Store->getContext(),
@@ -1985,7 +1985,7 @@ RValue CodeGenFunction::EmitLoadOfLValue(LValue LV, SourceLocation Loc) {
   }
 
   if (LV.isVectorElt()) {
-    llvm::LoadInst *Load = Builder.CreateLoad(LV.getVectorAddress(),
+    llvm::LoadInst *Load = Builder.CreateLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, LV.getVectorAddress(),
                                               LV.isVolatileQualified());
     return RValue::get(Builder.CreateExtractElement(Load, LV.getVectorIdx(),
                                                     "vecext"));
@@ -2009,7 +2009,7 @@ RValue CodeGenFunction::EmitLoadOfLValue(LValue LV, SourceLocation Loc) {
       MB.CreateIndexAssumption(Idx, MatTy->getNumElementsFlattened());
     }
     llvm::LoadInst *Load =
-        Builder.CreateLoad(LV.getMatrixAddress(), LV.isVolatileQualified());
+        Builder.CreateLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, LV.getMatrixAddress(), LV.isVolatileQualified());
     return RValue::get(Builder.CreateExtractElement(Load, Idx, "matrixext"));
   }
 
@@ -2026,7 +2026,7 @@ RValue CodeGenFunction::EmitLoadOfBitfieldLValue(LValue LV,
 
   Address Ptr = LV.getBitFieldAddress();
   llvm::Value *Val =
-      Builder.CreateLoad(Ptr, LV.isVolatileQualified(), "bf.load");
+      Builder.CreateLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, Ptr, LV.isVolatileQualified(), "bf.load");
 
   bool UseVolatile = LV.isVolatileQualified() &&
                      Info.VolatileStorageSize != 0 && isAAPCS(CGM.getTarget());
@@ -2055,7 +2055,7 @@ RValue CodeGenFunction::EmitLoadOfBitfieldLValue(LValue LV,
 // If this is a reference to a subset of the elements of a vector, create an
 // appropriate shufflevector.
 RValue CodeGenFunction::EmitLoadOfExtVectorElementLValue(LValue LV) {
-  llvm::Value *Vec = Builder.CreateLoad(LV.getExtVectorAddress(),
+  llvm::Value *Vec = Builder.CreateLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, LV.getExtVectorAddress(),
                                         LV.isVolatileQualified());
 
   const llvm::Constant *Elts = LV.getExtVectorElts();
@@ -2130,7 +2130,7 @@ void CodeGenFunction::EmitStoreThroughLValue(RValue Src, LValue Dst,
   if (!Dst.isSimple()) {
     if (Dst.isVectorElt()) {
       // Read/modify/write the vector, inserting the new element.
-      llvm::Value *Vec = Builder.CreateLoad(Dst.getVectorAddress(),
+      llvm::Value *Vec = Builder.CreateLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, Dst.getVectorAddress(),
                                             Dst.isVolatileQualified());
       auto *IRStoreTy = dyn_cast<llvm::IntegerType>(Vec->getType());
       if (IRStoreTy) {
@@ -2145,7 +2145,7 @@ void CodeGenFunction::EmitStoreThroughLValue(RValue Src, LValue Dst,
         // <N x i1> --> <iN>.
         Vec = Builder.CreateBitCast(Vec, IRStoreTy);
       }
-      Builder.CreateStore(Vec, Dst.getVectorAddress(),
+      Builder.CreateStore(!CGM.getCodeGenOpts().UseDefaultAlignment, Vec, Dst.getVectorAddress(),
                           Dst.isVolatileQualified());
       return;
     }
@@ -2165,10 +2165,10 @@ void CodeGenFunction::EmitStoreThroughLValue(RValue Src, LValue Dst,
         llvm::MatrixBuilder MB(Builder);
         MB.CreateIndexAssumption(Idx, MatTy->getNumElementsFlattened());
       }
-      llvm::Instruction *Load = Builder.CreateLoad(Dst.getMatrixAddress());
+      llvm::Instruction *Load = Builder.CreateLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, Dst.getMatrixAddress());
       llvm::Value *Vec =
           Builder.CreateInsertElement(Load, Src.getScalarVal(), Idx, "matins");
-      Builder.CreateStore(Vec, Dst.getMatrixAddress(),
+      Builder.CreateStore(!CGM.getCodeGenOpts().UseDefaultAlignment, Vec, Dst.getMatrixAddress(),
                           Dst.isVolatileQualified());
       return;
     }
@@ -2274,7 +2274,7 @@ void CodeGenFunction::EmitStoreThroughBitfieldLValue(RValue Src, LValue Dst,
   if (StorageSize != Info.Size) {
     assert(StorageSize > Info.Size && "Invalid bitfield size.");
     llvm::Value *Val =
-        Builder.CreateLoad(Ptr, Dst.isVolatileQualified(), "bf.load");
+        Builder.CreateLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, Ptr, Dst.isVolatileQualified(), "bf.load");
 
     // Mask the source value as needed.
     if (!hasBooleanRepresentation(Dst.getType()))
@@ -2301,11 +2301,11 @@ void CodeGenFunction::EmitStoreThroughBitfieldLValue(RValue Src, LValue Dst,
     // of the container. The two accesses are not atomic.
     if (Dst.isVolatileQualified() && isAAPCS(CGM.getTarget()) &&
         CGM.getCodeGenOpts().ForceAAPCSBitfieldLoad)
-      Builder.CreateLoad(Ptr, true, "bf.load");
+      Builder.CreateLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, Ptr, true, "bf.load");
   }
 
   // Write the new value back out.
-  Builder.CreateStore(SrcVal, Ptr, Dst.isVolatileQualified());
+  Builder.CreateStore(!CGM.getCodeGenOpts().UseDefaultAlignment, SrcVal, Ptr, Dst.isVolatileQualified());
 
   // Return the new value of the bit-field, if requested.
   if (Result) {
@@ -2331,7 +2331,7 @@ void CodeGenFunction::EmitStoreThroughExtVectorComponentLValue(RValue Src,
                                                                LValue Dst) {
   // This access turns into a read/modify/write of the vector.  Load the input
   // value now.
-  llvm::Value *Vec = Builder.CreateLoad(Dst.getExtVectorAddress(),
+  llvm::Value *Vec = Builder.CreateLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, Dst.getExtVectorAddress(),
                                         Dst.isVolatileQualified());
   const llvm::Constant *Elts = Dst.getExtVectorElts();
 
@@ -2386,7 +2386,7 @@ void CodeGenFunction::EmitStoreThroughExtVectorComponentLValue(RValue Src,
     Vec = Builder.CreateInsertElement(Vec, SrcVal, Elt);
   }
 
-  Builder.CreateStore(Vec, Dst.getExtVectorAddress(),
+  Builder.CreateStore(!CGM.getCodeGenOpts().UseDefaultAlignment, Vec, Dst.getExtVectorAddress(),
                       Dst.isVolatileQualified());
 }
 
@@ -2559,7 +2559,7 @@ CodeGenFunction::EmitLoadOfReference(LValue RefLVal,
                                      LValueBaseInfo *PointeeBaseInfo,
                                      TBAAAccessInfo *PointeeTBAAInfo) {
   llvm::LoadInst *Load =
-      Builder.CreateLoad(RefLVal.getAddress(*this), RefLVal.isVolatile());
+      Builder.CreateLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, RefLVal.getAddress(*this), RefLVal.isVolatile());
   CGM.DecorateInstructionWithTBAA(Load, RefLVal.getTBAAInfo());
 
   QualType PointeeType = RefLVal.getType()->getPointeeType();
@@ -2582,7 +2582,7 @@ Address CodeGenFunction::EmitLoadOfPointer(Address Ptr,
                                            const PointerType *PtrTy,
                                            LValueBaseInfo *BaseInfo,
                                            TBAAAccessInfo *TBAAInfo) {
-  llvm::Value *Addr = Builder.CreateLoad(Ptr);
+  llvm::Value *Addr = Builder.CreateLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, Ptr);
   return Address(Addr, ConvertTypeForMem(PtrTy->getPointeeType()),
                  CGM.getNaturalTypeAlignment(PtrTy->getPointeeType(), BaseInfo,
                                              TBAAInfo,
@@ -3136,7 +3136,7 @@ llvm::Value *CodeGenFunction::EmitCheckValue(llvm::Value *V) {
   // Pointers are passed directly, everything else is passed by address.
   if (!V->getType()->isPointerTy()) {
     Address Ptr = CreateDefaultAlignTempAlloca(V->getType());
-    Builder.CreateStore(V, Ptr);
+    Builder.CreateStore(!CGM.getCodeGenOpts().UseDefaultAlignment, V, Ptr);
     V = Ptr.getPointer();
   }
   return Builder.CreatePtrToInt(V, TargetTy);
@@ -3519,7 +3519,7 @@ void CodeGenFunction::EmitCfiCheckFail() {
       0);
 
   Address CheckKindAddr(V, Int8Ty, getIntAlign());
-  llvm::Value *CheckKind = Builder.CreateLoad(CheckKindAddr);
+  llvm::Value *CheckKind = Builder.CreateLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, CheckKindAddr);
 
   llvm::Value *AllVtables = llvm::MetadataAsValue::get(
       CGM.getLLVMContext(),
@@ -4004,7 +4004,7 @@ static Address emitOMPArraySectionBase(CodeGenFunction &CGF, const Expr *Base,
         CGF.CGM.getNaturalTypeAlignment(ElTy, &TypeBaseInfo, &TypeTBAAInfo);
     BaseInfo.mergeForCast(TypeBaseInfo);
     TBAAInfo = CGF.CGM.mergeTBAAInfoForCast(TBAAInfo, TypeTBAAInfo);
-    return Address(CGF.Builder.CreateLoad(BaseLVal.getAddress(CGF)),
+    return Address(CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, BaseLVal.getAddress(CGF)),
                    CGF.ConvertTypeForMem(ElTy), Align);
   }
   return CGF.EmitPointerWithAlignment(Base, &BaseInfo, &TBAAInfo);
@@ -4195,7 +4195,7 @@ EmitExtVectorElementExpr(const ExtVectorElementExpr *E) {
 
     // Store the vector to memory (because LValue wants an address).
     Address VecMem = CreateMemTemp(E->getBase()->getType());
-    Builder.CreateStore(Vec, VecMem);
+    Builder.CreateStore(!CGM.getCodeGenOpts().UseDefaultAlignment, Vec, VecMem);
     Base = MakeAddrLValue(VecMem, E->getBase()->getType(),
                           AlignmentSource::Decl);
   }
@@ -5349,7 +5349,7 @@ RValue CodeGenFunction::EmitCall(QualType CalleeType, const CGCallee &OrigCallee
       llvm::Value *CalleeSigPtr =
           Builder.CreateConstGEP2_32(PrefixStructTy, CalleePrefixStruct, 0, 0);
       llvm::Value *CalleeSig =
-          Builder.CreateAlignedLoad(PrefixSigType, CalleeSigPtr, getIntAlign());
+          Builder.CreateAlignedLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, PrefixSigType, CalleeSigPtr, getIntAlign());
       llvm::Value *CalleeSigMatch = Builder.CreateICmpEQ(CalleeSig, PrefixSig);
 
       llvm::BasicBlock *Cont = createBasicBlock("cont");
@@ -5360,7 +5360,7 @@ RValue CodeGenFunction::EmitCall(QualType CalleeType, const CGCallee &OrigCallee
       llvm::Value *CalleeRTTIPtr =
           Builder.CreateConstGEP2_32(PrefixStructTy, CalleePrefixStruct, 0, 1);
       llvm::Value *CalleeRTTIEncoded =
-          Builder.CreateAlignedLoad(Int32Ty, CalleeRTTIPtr, getPointerAlign());
+          Builder.CreateAlignedLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, Int32Ty, CalleeRTTIPtr, getPointerAlign());
       llvm::Value *CalleeRTTI =
           DecodeAddrUsedInPrologue(CalleePtr, CalleeRTTIEncoded);
       llvm::Value *CalleeRTTIMatch =
@@ -5490,7 +5490,7 @@ RValue CodeGenFunction::EmitCall(QualType CalleeType, const CGCallee &OrigCallee
     llvm::Value *Handle = Callee.getFunctionPointer();
     auto *Cast =
         Builder.CreateBitCast(Handle, Handle->getType()->getPointerTo());
-    auto *Stub = Builder.CreateLoad(
+    auto *Stub = Builder.CreateLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, 
         Address(Cast, Handle->getType(), CGM.getPointerAlign()));
     Callee.setFunctionPointer(Stub);
   }

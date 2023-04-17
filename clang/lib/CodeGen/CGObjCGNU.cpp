@@ -759,7 +759,7 @@ class CGObjCGNUstep : public CGObjCGNU {
       // Store the receiver on the stack so that we can reload it later
       Address ReceiverPtr =
         CGF.CreateTempAlloca(Receiver->getType(), CGF.getPointerAlign());
-      Builder.CreateStore(Receiver, ReceiverPtr);
+      Builder.CreateStore(!CGM.getCodeGenOpts().UseDefaultAlignment, Receiver, ReceiverPtr);
 
       llvm::Value *self;
 
@@ -782,13 +782,13 @@ class CGObjCGNUstep : public CGObjCGNU {
       slot->setMetadata(msgSendMDKind, node);
 
       // Load the imp from the slot
-      llvm::Value *imp = Builder.CreateAlignedLoad(
+      llvm::Value *imp = Builder.CreateAlignedLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, 
           IMPTy, Builder.CreateStructGEP(SlotStructTy, slot, 4),
           CGF.getPointerAlign());
 
       // The lookup function may have changed the receiver, so make sure we use
       // the new one.
-      Receiver = Builder.CreateLoad(ReceiverPtr, true);
+      Receiver = Builder.CreateLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, ReceiverPtr, true);
       return imp;
     }
 
@@ -802,7 +802,7 @@ class CGObjCGNUstep : public CGObjCGNU {
         CGF.EmitNounwindRuntimeCall(SlotLookupSuperFn, lookupArgs);
       slot->setOnlyReadsMemory();
 
-      return Builder.CreateAlignedLoad(
+      return Builder.CreateAlignedLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, 
           IMPTy, Builder.CreateStructGEP(SlotStructTy, slot, 4),
           CGF.getPointerAlign());
     }
@@ -1264,7 +1264,7 @@ class CGObjCGNUstep2 : public CGObjCGNUstep {
   llvm::Value *GetClassNamed(CodeGenFunction &CGF,
                              const std::string &Name,
                              bool isWeak) override {
-    return CGF.Builder.CreateLoad(
+    return CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, 
         Address(GetClassVar(Name, isWeak), IdTy, CGM.getPointerAlign()));
   }
   int32_t FlagsForOwnership(Qualifiers::ObjCLifetime Ownership) {
@@ -1335,7 +1335,7 @@ class CGObjCGNUstep2 : public CGObjCGNUstep {
       Ref = GV;
     }
     EmittedProtocolRef = true;
-    return CGF.Builder.CreateAlignedLoad(ProtocolPtrTy, Ref,
+    return CGF.Builder.CreateAlignedLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, ProtocolPtrTy, Ref,
                                          CGM.getPointerAlign());
   }
 
@@ -1659,7 +1659,7 @@ class CGObjCGNUstep2 : public CGObjCGNUstep {
         auto *global = TheModule.getGlobalVariable(lateInit.first);
         if (global) {
           llvm::GlobalVariable *GV = lateInit.second.first;
-          b.CreateAlignedStore(
+          b.CreateAlignedStore( 
               global,
               b.CreateStructGEP(GV->getValueType(), GV, lateInit.second.second),
               CGM.getPointerAlign().getAsAlign());
@@ -1699,7 +1699,7 @@ class CGObjCGNUstep2 : public CGObjCGNUstep {
               llvm::GlobalValue::ExternalLinkage, nullptr, Name);
     CharUnits Align = CGM.getIntAlign();
     llvm::Value *Offset =
-        CGF.Builder.CreateAlignedLoad(IntTy, IvarOffsetPointer, Align);
+        CGF.Builder.CreateAlignedLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, IntTy, IvarOffsetPointer, Align);
     if (Offset->getType() != PtrDiffTy)
       Offset = CGF.Builder.CreateZExtOrBitCast(Offset, PtrDiffTy);
     return Offset;
@@ -2370,7 +2370,7 @@ Address CGObjCGNU::GetAddrOfSelector(CodeGenFunction &CGF, Selector Sel) {
   // GetAddrOfSelector?  Hopefully.
   Address tmp = CGF.CreateTempAlloca(SelValue->getType(),
                                      CGF.getPointerAlign());
-  CGF.Builder.CreateStore(SelValue, tmp);
+  CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, SelValue, tmp);
   return tmp;
 }
 
@@ -2559,7 +2559,7 @@ CGObjCGNU::GenerateMessageSendSuper(CodeGenFunction &CGF,
       ReceiverClass = Builder.CreateBitCast(ReceiverClass,
                                             llvm::PointerType::getUnqual(IdTy));
       ReceiverClass =
-        Builder.CreateAlignedLoad(IdTy, ReceiverClass, CGF.getPointerAlign());
+        Builder.CreateAlignedLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, IdTy, ReceiverClass, CGF.getPointerAlign());
     }
     ReceiverClass = EnforceType(Builder, ReceiverClass, IdTy);
   } else {
@@ -2604,7 +2604,7 @@ CGObjCGNU::GenerateMessageSendSuper(CodeGenFunction &CGF,
     ReceiverClass = Builder.CreateStructGEP(CastTy, ReceiverClass, 1);
     // Load the superclass pointer
     ReceiverClass =
-      Builder.CreateAlignedLoad(IdTy, ReceiverClass, CGF.getPointerAlign());
+      Builder.CreateAlignedLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, IdTy, ReceiverClass, CGF.getPointerAlign());
   }
   // Construct the structure used to look up the IMP
   llvm::StructType *ObjCSuperTy =
@@ -2613,8 +2613,8 @@ CGObjCGNU::GenerateMessageSendSuper(CodeGenFunction &CGF,
   Address ObjCSuper = CGF.CreateTempAlloca(ObjCSuperTy,
                               CGF.getPointerAlign());
 
-  Builder.CreateStore(Receiver, Builder.CreateStructGEP(ObjCSuper, 0));
-  Builder.CreateStore(ReceiverClass, Builder.CreateStructGEP(ObjCSuper, 1));
+  Builder.CreateStore(!CGM.getCodeGenOpts().UseDefaultAlignment, Receiver, Builder.CreateStructGEP(ObjCSuper, 0));
+  Builder.CreateStore(!CGM.getCodeGenOpts().UseDefaultAlignment, ReceiverClass, Builder.CreateStructGEP(ObjCSuper, 1));
 
   // Get the IMP
   llvm::Value *imp = LookupIMPSuper(CGF, ObjCSuper, cmd, MSI);
@@ -4173,8 +4173,8 @@ llvm::Value *CGObjCGNU::EmitIvarOffset(CodeGenFunction &CGF,
     if (RuntimeVersion < 10 ||
         CGF.CGM.getTarget().getTriple().isKnownWindowsMSVCEnvironment())
       return CGF.Builder.CreateZExtOrBitCast(
-          CGF.Builder.CreateAlignedLoad(
-              Int32Ty, CGF.Builder.CreateAlignedLoad(
+          CGF.Builder.CreateAlignedLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, 
+              Int32Ty, CGF.Builder.CreateAlignedLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, 
                            llvm::Type::getInt32PtrTy(VMContext),
                            ObjCIvarOffsetVariable(Interface, Ivar),
                            CGF.getPointerAlign(), "ivar"),
@@ -4191,7 +4191,7 @@ llvm::Value *CGObjCGNU::EmitIvarOffset(CodeGenFunction &CGF,
       GV->setAlignment(Align.getAsAlign());
       Offset = GV;
     }
-    Offset = CGF.Builder.CreateAlignedLoad(IntTy, Offset, Align);
+    Offset = CGF.Builder.CreateAlignedLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, IntTy, Offset, Align);
     if (Offset->getType() != PtrDiffTy)
       Offset = CGF.Builder.CreateZExtOrBitCast(Offset, PtrDiffTy);
     return Offset;

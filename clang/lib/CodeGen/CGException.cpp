@@ -431,11 +431,11 @@ Address CodeGenFunction::getEHSelectorSlot() {
 }
 
 llvm::Value *CodeGenFunction::getExceptionFromSlot() {
-  return Builder.CreateLoad(getExceptionSlot(), "exn");
+  return Builder.CreateLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, getExceptionSlot(), "exn");
 }
 
 llvm::Value *CodeGenFunction::getSelectorFromSlot() {
-  return Builder.CreateLoad(getEHSelectorSlot(), "sel");
+  return Builder.CreateLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, getEHSelectorSlot(), "sel");
 }
 
 void CodeGenFunction::EmitCXXThrowExpr(const CXXThrowExpr *E,
@@ -833,9 +833,9 @@ llvm::BasicBlock *CodeGenFunction::EmitLandingPad() {
       Builder.CreateLandingPad(llvm::StructType::get(Int8PtrTy, Int32Ty), 0);
 
   llvm::Value *LPadExn = Builder.CreateExtractValue(LPadInst, 0);
-  Builder.CreateStore(LPadExn, getExceptionSlot());
+  Builder.CreateStore(!CGM.getCodeGenOpts().UseDefaultAlignment, LPadExn, getExceptionSlot());
   llvm::Value *LPadSel = Builder.CreateExtractValue(LPadInst, 1);
-  Builder.CreateStore(LPadSel, getEHSelectorSlot());
+  Builder.CreateStore(!CGM.getCodeGenOpts().UseDefaultAlignment, LPadSel, getEHSelectorSlot());
 
   // Save the exception pointer.  It's safe to use a single exception
   // pointer per function because EH cleanups can never have nested
@@ -1031,7 +1031,7 @@ static void emitWasmCatchPadBlock(CodeGenFunction &CGF,
   llvm::Function *GetSelectorFn =
       CGF.CGM.getIntrinsic(llvm::Intrinsic::wasm_get_ehselector);
   llvm::CallInst *Exn = CGF.Builder.CreateCall(GetExnFn, CPI);
-  CGF.Builder.CreateStore(Exn, CGF.getExceptionSlot());
+  CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, Exn, CGF.getExceptionSlot());
   llvm::CallInst *Selector = CGF.Builder.CreateCall(GetSelectorFn, CPI);
 
   llvm::Function *TypeIDFn = CGF.CGM.getIntrinsic(llvm::Intrinsic::eh_typeid_for);
@@ -1361,7 +1361,7 @@ namespace {
       // Save the current cleanup destination in case there are
       // cleanups in the finally block.
       llvm::Value *SavedCleanupDest =
-        CGF.Builder.CreateLoad(CGF.getNormalCleanupDestSlot(),
+        CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, CGF.getNormalCleanupDestSlot(),
                                "cleanup.dest.saved");
 
       // Emit the finally block.
@@ -1380,7 +1380,7 @@ namespace {
         CGF.EmitBlock(RethrowBB);
         if (SavedExnVar) {
           CGF.EmitRuntimeCallOrInvoke(RethrowFn,
-            CGF.Builder.CreateAlignedLoad(CGF.Int8PtrTy, SavedExnVar,
+            CGF.Builder.CreateAlignedLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, CGF.Int8PtrTy, SavedExnVar,
                                           CGF.getPointerAlign()));
         } else {
           CGF.EmitRuntimeCallOrInvoke(RethrowFn);
@@ -1390,7 +1390,7 @@ namespace {
         CGF.EmitBlock(ContBB);
 
         // Restore the cleanup destination.
-        CGF.Builder.CreateStore(SavedCleanupDest,
+        CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, SavedCleanupDest,
                                 CGF.getNormalCleanupDestSlot());
       }
 
@@ -1491,7 +1491,7 @@ void CodeGenFunction::FinallyInfo::exit(CodeGenFunction &CGF) {
     // If we need to remember the exception pointer to rethrow later, do so.
     if (SavedExnVar) {
       if (!exn) exn = CGF.getExceptionFromSlot();
-      CGF.Builder.CreateAlignedStore(exn, SavedExnVar, CGF.getPointerAlign());
+      CGF.Builder.CreateAlignedStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, exn, SavedExnVar, CGF.getPointerAlign());
     }
 
     // Tell the cleanups in the finally block that we're do this for EH.
@@ -1733,7 +1733,7 @@ struct PerformSEHFinally final : EHScopeStack::Cleanup {
     //   as 1st Arg to indicate abnormal termination
     if (!F.isForEHCleanup() && F.hasExitSwitch()) {
       Address Addr = CGF.getNormalCleanupDestSlot();
-      llvm::Value *Load = CGF.Builder.CreateLoad(Addr, "cleanup.dest");
+      llvm::Value *Load = CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, Addr, "cleanup.dest");
       llvm::Value *Zero = llvm::Constant::getNullValue(CGM.Int32Ty);
       IsForEH = CGF.Builder.CreateICmpNE(Load, Zero);
     }
@@ -1931,7 +1931,7 @@ void CodeGenFunction::EmitCapturedLocals(CodeGenFunction &ParentCGF,
           FrameRecoverFn, {ParentI8Fn, ParentFP,
                            llvm::ConstantInt::get(Int32Ty, FrameEscapeIdx)});
       ParentFP = Builder.CreateBitCast(ParentFP, CGM.VoidPtrPtrTy);
-      ParentFP = Builder.CreateLoad(
+      ParentFP = Builder.CreateLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, 
           Address(ParentFP, CGM.VoidPtrTy, getPointerAlign()));
     }
   }
@@ -1965,7 +1965,7 @@ void CodeGenFunction::EmitCapturedLocals(CodeGenFunction &ParentCGF,
     if (isa<ImplicitParamDecl>(VD)) {
       CXXABIThisAlignment = ParentCGF.CXXABIThisAlignment;
       CXXThisAlignment = ParentCGF.CXXThisAlignment;
-      CXXABIThisValue = Builder.CreateLoad(Recovered, "this");
+      CXXABIThisValue = Builder.CreateLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, Recovered, "this");
       if (ParentCGF.LambdaThisCaptureField) {
         LambdaThisCaptureField = ParentCGF.LambdaThisCaptureField;
         // We are in a lambda function where "this" is captured so the
@@ -2067,7 +2067,7 @@ CodeGenFunction::GenerateSEHFilterFunction(CodeGenFunction &ParentCGF,
   llvm::Value *R = EmitScalarExpr(FilterExpr);
   R = Builder.CreateIntCast(R, ConvertType(getContext().LongTy),
                             FilterExpr->getType()->isSignedIntegerType());
-  Builder.CreateStore(R, ReturnValue);
+  Builder.CreateStore(!CGM.getCodeGenOpts().UseDefaultAlignment, R, ReturnValue);
 
   FinishFunction(FilterExpr->getEndLoc());
 
@@ -2105,7 +2105,7 @@ void CodeGenFunction::EmitSEHExceptionCodeSave(CodeGenFunction &ParentCGF,
     // load the pointer.
     SEHInfo = Builder.CreateConstInBoundsGEP1_32(Int8Ty, EntryFP, -20);
     SEHInfo = Builder.CreateBitCast(SEHInfo, Int8PtrTy->getPointerTo());
-    SEHInfo = Builder.CreateAlignedLoad(Int8PtrTy, SEHInfo, getPointerAlign());
+    SEHInfo = Builder.CreateAlignedLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, Int8PtrTy, SEHInfo, getPointerAlign());
     SEHCodeSlotStack.push_back(recoverAddrOfEscapedLocal(
         ParentCGF, ParentCGF.SEHCodeSlotStack.back(), ParentFP));
   }
@@ -2121,10 +2121,10 @@ void CodeGenFunction::EmitSEHExceptionCodeSave(CodeGenFunction &ParentCGF,
   llvm::Type *PtrsTy = llvm::StructType::get(RecordTy, CGM.VoidPtrTy);
   llvm::Value *Ptrs = Builder.CreateBitCast(SEHInfo, PtrsTy->getPointerTo());
   llvm::Value *Rec = Builder.CreateStructGEP(PtrsTy, Ptrs, 0);
-  Rec = Builder.CreateAlignedLoad(RecordTy, Rec, getPointerAlign());
-  llvm::Value *Code = Builder.CreateAlignedLoad(Int32Ty, Rec, getIntAlign());
+  Rec = Builder.CreateAlignedLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, RecordTy, Rec, getPointerAlign());
+  llvm::Value *Code = Builder.CreateAlignedLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, Int32Ty, Rec, getIntAlign());
   assert(!SEHCodeSlotStack.empty() && "emitting EH code outside of __except");
-  Builder.CreateStore(Code, SEHCodeSlotStack.back());
+  Builder.CreateStore(!CGM.getCodeGenOpts().UseDefaultAlignment, Code, SEHCodeSlotStack.back());
 }
 
 llvm::Value *CodeGenFunction::EmitSEHExceptionInfo() {
@@ -2138,7 +2138,7 @@ llvm::Value *CodeGenFunction::EmitSEHExceptionInfo() {
 
 llvm::Value *CodeGenFunction::EmitSEHExceptionCode() {
   assert(!SEHCodeSlotStack.empty() && "emitting EH code outside of __except");
-  return Builder.CreateLoad(SEHCodeSlotStack.back());
+  return Builder.CreateLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, SEHCodeSlotStack.back());
 }
 
 llvm::Value *CodeGenFunction::EmitSEHAbnormalTermination() {
@@ -2251,7 +2251,7 @@ void CodeGenFunction::ExitSEHTryStmt(const SEHTryStmt &S) {
     llvm::Function *SEHCodeIntrin =
         CGM.getIntrinsic(llvm::Intrinsic::eh_exceptioncode);
     llvm::Value *Code = Builder.CreateCall(SEHCodeIntrin, {CPI});
-    Builder.CreateStore(Code, SEHCodeSlotStack.back());
+    Builder.CreateStore(!CGM.getCodeGenOpts().UseDefaultAlignment, Code, SEHCodeSlotStack.back());
   }
 
   // Emit the __except body.

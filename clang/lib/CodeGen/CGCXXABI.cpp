@@ -143,7 +143,7 @@ void CGCXXABI::buildThisParam(CodeGenFunction &CGF, FunctionArgList &params) {
 }
 
 llvm::Value *CGCXXABI::loadIncomingCXXThis(CodeGenFunction &CGF) {
-  return CGF.Builder.CreateLoad(CGF.GetAddrOfLocalVar(getThisDecl(CGF)),
+  return CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, CGF.GetAddrOfLocalVar(getThisDecl(CGF)),
                                 "this");
 }
 

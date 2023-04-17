@@ -309,7 +309,7 @@ llvm::Function *CodeGenFunction::createTLSAtExitStub(
     call->setCallingConv(DtorFn->getCallingConv());
 
   // Return 0 from function
-  CGF.Builder.CreateStore(llvm::Constant::getNullValue(CGM.IntTy),
+  CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, llvm::Constant::getNullValue(CGM.IntTy),
                           CGF.ReturnValue);
 
   CGF.FinishFunction();
@@ -995,7 +995,7 @@ CodeGenFunction::GenerateCXXGlobalInitFunc(llvm::Function *Fn,
     if (Guard.isValid()) {
       // If we have a guard variable, check whether we've already performed
       // these initializations. This happens for TLS initialization functions.
-      llvm::Value *GuardVal = Builder.CreateLoad(Guard);
+      llvm::Value *GuardVal = Builder.CreateLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, Guard);
       llvm::Value *Uninit = Builder.CreateIsNull(GuardVal,
                                                  "guard.uninitialized");
       llvm::BasicBlock *InitBlock = createBasicBlock("init");
@@ -1006,7 +1006,7 @@ CodeGenFunction::GenerateCXXGlobalInitFunc(llvm::Function *Fn,
       // Mark as initialized before initializing anything else. If the
       // initializers use previously-initialized thread_local vars, that's
       // probably supposed to be OK, but the standard doesn't say.
-      Builder.CreateStore(llvm::ConstantInt::get(GuardVal->getType(),1), Guard);
+      Builder.CreateStore(!CGM.getCodeGenOpts().UseDefaultAlignment, llvm::ConstantInt::get(GuardVal->getType(),1), Guard);
 
       // The guard variable can't ever change again.
       EmitInvariantStart(

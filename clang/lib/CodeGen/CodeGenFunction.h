@@ -1016,7 +1016,7 @@ public:
       QualType VarTy = LocalVD->getType();
       if (VarTy->isReferenceType()) {
         Address Temp = CGF.CreateMemTemp(VarTy);
-        CGF.Builder.CreateStore(TempAddr.getPointer(), Temp);
+        CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, TempAddr.getPointer(), Temp);
         TempAddr = Temp;
       }
       SavedTempAddresses.try_emplace(LocalVD, TempAddr);
@@ -4825,7 +4825,7 @@ DominatingLLVMValue::save(CodeGenFunction &CGF, llvm::Value *value) {
             CGF.CGM.getDataLayout().getPrefTypeAlignment(value->getType()));
   Address alloca =
     CGF.CreateTempAlloca(value->getType(), align, "cond-cleanup.save");
-  CGF.Builder.CreateStore(value, alloca);
+  CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, value, alloca);
 
   return saved_type(alloca.getPointer(), true);
 }
@@ -4837,8 +4837,10 @@ inline llvm::Value *DominatingLLVMValue::restore(CodeGenFunction &CGF,
 
   // Otherwise, it should be an alloca instruction, as set up in save().
   auto alloca = cast<llvm::AllocaInst>(value.getPointer());
-  return CGF.Builder.CreateAlignedLoad(alloca->getAllocatedType(), alloca,
-                                       alloca->getAlign());
+	if (!CGF.CGM.getCodeGenOpts().UseDefaultAlignment)
+    return CGF.Builder.CreateAlignedLoad(alloca->getAllocatedType(), alloca, llvm::MaybeAlign(1));
+	else
+    return CGF.Builder.CreateAlignedLoad(alloca->getAllocatedType(), alloca, alloca->getAlign());
 }
 
 }  // end namespace CodeGen

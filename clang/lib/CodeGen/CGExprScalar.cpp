@@ -422,7 +422,7 @@ public:
 
     if (Value *Result = ConstantEmitter(CGF).tryEmitConstantExpr(E)) {
       if (E->isGLValue())
-        return CGF.Builder.CreateLoad(Address(
+        return CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, Address(
             Result, CGF.ConvertTypeForMem(E->getType()),
             CGF.getContext().getTypeAlignInChars(E->getType())));
       return Result;
@@ -2525,7 +2525,7 @@ ScalarExprEmitter::EmitScalarPrePostIncDec(const UnaryOperator *E, LValue LV,
     if (isInc && type->isBooleanType()) {
       llvm::Value *True = CGF.EmitToMemory(Builder.getTrue(), type);
       if (isPre) {
-        Builder.CreateStore(True, LV.getAddress(CGF), LV.isVolatileQualified())
+        Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, True, LV.getAddress(CGF), LV.isVolatileQualified())
             ->setAtomic(llvm::AtomicOrdering::SequentiallyConsistent);
         return Builder.getTrue();
       }
@@ -4738,7 +4738,7 @@ Value *ScalarExprEmitter::VisitVAArgExpr(VAArgExpr *VE) {
   }
 
   // FIXME Volatility.
-  llvm::Value *Val = Builder.CreateLoad(ArgPtr);
+  llvm::Value *Val = Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, ArgPtr);
 
   // If EmitVAArg promoted the type, we must truncate it.
   if (ArgTy != Val->getType()) {

@@ -417,7 +417,7 @@ void CodeGenFunction::EmitMustTailThunk(GlobalDecl GD,
     llvm::Type *ThisType = ThisAddr.getElementType();
     if (ThisType != AdjustedThisPtr->getType())
       AdjustedThisPtr = Builder.CreateBitCast(AdjustedThisPtr, ThisType);
-    Builder.CreateStore(AdjustedThisPtr, ThisAddr);
+    Builder.CreateStore(!CGM.getCodeGenOpts().UseDefaultAlignment, AdjustedThisPtr, ThisAddr);
   }
 
   // Emit the musttail call manually.  Even if the prologue pushed cleanups, we
