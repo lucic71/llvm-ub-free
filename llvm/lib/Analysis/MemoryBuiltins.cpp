@@ -481,12 +481,8 @@ Constant *llvm::getInitialValueOfAllocation(const Value *V,
     else
       return UndefValue::get(Ty);
   }
-  if ((AK & AllocFnKind::Zeroed) != AllocFnKind::Unknown) {
-    if (ZeroUninitLoads)
+  if ((AK & AllocFnKind::Zeroed) != AllocFnKind::Unknown)
       return Constant::getNullValue(Ty);
-    else
-      return UndefValue::get(Ty);
-  }
 
   return nullptr;
 }
