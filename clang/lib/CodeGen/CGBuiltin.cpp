@@ -963,8 +963,9 @@ static llvm::Value *EmitBitTestIntrinsic(CodeGenFunction &CGF,
   Value *ByteIndex = CGF.Builder.CreateAShr(
       BitPos, llvm::ConstantInt::get(BitPos->getType(), 3), "bittest.byteidx");
   Value *BitBaseI8 = CGF.Builder.CreatePointerCast(BitBase, CGF.Int8PtrTy);
-  Address ByteAddr(CGF.Builder.CreateInBoundsGEP(CGF.Int8Ty, BitBaseI8,
-                                                 ByteIndex, "bittest.byteaddr"),
+  Address ByteAddr(CGF.CGM.getCodeGenOpts().DropInboundsFromGEP
+                   ? CGF.Builder.CreateGEP(CGF.Int8Ty, BitBaseI8, ByteIndex, "bittest.byteaddr")
+                   : CGF.Builder.CreateInBoundsGEP(CGF.Int8Ty, BitBaseI8, ByteIndex, "bittest.byteaddr"),
                    CGF.Int8Ty, CharUnits::One());
   Value *PosLow =
       CGF.Builder.CreateAnd(CGF.Builder.CreateTrunc(BitPos, CGF.Int8Ty),
@@ -3432,8 +3433,9 @@ RValue CodeGenFunction::EmitBuiltinExpr(const GlobalDecl GD, unsigned BuiltinID,
     Builder.CreateMemCpy(Dest, Src, SizeVal, false);
     if (BuiltinID == Builtin::BImempcpy ||
         BuiltinID == Builtin::BI__builtin_mempcpy)
-      return RValue::get(Builder.CreateInBoundsGEP(Dest.getElementType(),
-                                                   Dest.getPointer(), SizeVal));
+      return RValue::get(CGM.getCodeGenOpts().DropInboundsFromGEP
+                         ? Builder.CreateGEP(Dest.getElementType(), Dest.getPointer(), SizeVal)
+                         : Builder.CreateInBoundsGEP(Dest.getElementType(), Dest.getPointer(), SizeVal));
     else
       return RValue::get(Dest.getPointer());
   }
@@ -3795,7 +3797,9 @@ RValue CodeGenFunction::EmitBuiltinExpr(const GlobalDecl GD, unsigned BuiltinID,
     // Store the stack pointer to the setjmp buffer.
     Value *StackAddr =
         Builder.CreateCall(CGM.getIntrinsic(Intrinsic::stacksave));
-    Address StackSaveSlot = Builder.CreateConstInBoundsGEP(Buf, 2);
+    Address StackSaveSlot = CGM.getCodeGenOpts().DropInboundsFromGEP
+    ? Builder.CreateConstInBoundsGEP(Buf, 2)
+    : Builder.CreateConstInBoundsGEP(Buf, 2);
     Builder.CreateStore(!CGM.getCodeGenOpts().UseDefaultAlignment, StackAddr, StackSaveSlot);
 
     // Call LLVM's EH setjmp, which is lightweight.
@@ -14985,7 +14989,9 @@ Value *CodeGenFunction::EmitX86BuiltinExpr(unsigned BuiltinID,
     Value *Store = nullptr;
     for (unsigned i = 0; i < 4; i++) {
       Value *Extracted = Builder.CreateExtractValue(IACall, i);
-      Value *StorePtr = Builder.CreateConstInBoundsGEP1_32(Int32Ty, BasePtr, i);
+      Value *StorePtr = CGM.getCodeGenOpts().DropInboundsFromGEP
+        ? Builder.CreateConstGEP1_32(Int32Ty, BasePtr, i)
+        : Builder.CreateConstInBoundsGEP1_32(Int32Ty, BasePtr, i);
       Store = Builder.CreateAlignedStore(!CGM.getCodeGenOpts().UseDefaultAlignment, Extracted, StorePtr, getIntAlign());
     }
 
@@ -16207,7 +16213,7 @@ Value *CodeGenFunction::EmitPPCBuiltinExpr(unsigned BuiltinID,
       for (unsigned i=0; i<NumVecs; i++) {
         Value *Vec = Builder.CreateExtractValue(Call, i);
         llvm::ConstantInt* Index = llvm::ConstantInt::get(IntTy, i);
-        Value *GEP = Builder.CreateInBoundsGEP(VTy, Ptr, Index);
+        Value *GEP = CGM.getCodeGenOpts().DropInboundsFromGEP ? Builder.CreateGEP(VTy, Ptr, Index) : Builder.CreateInBoundsGEP(VTy, Ptr, Index);
         Builder.CreateAlignedStore(Vec, GEP, MaybeAlign(16));
       }
       return Call;
@@ -18322,7 +18328,7 @@ RValue CodeGenFunction::EmitBuiltinAlignTo(const CallExpr *E, bool AlignUp) {
     // The result must point to the same underlying allocation. This means we
     // can use an inbounds GEP to enable better optimization.
     Value *Base = EmitCastToVoidPtr(Args.Src);
-    if (getLangOpts().isSignedOverflowDefined())
+    if (getLangOpts().isSignedOverflowDefined() || CGM.getCodeGenOpts().DropInboundsFromGEP)
       Result = Builder.CreateGEP(Int8Ty, Base, Difference, "aligned_result");
     else
       Result = EmitCheckedInBoundsGEP(Int8Ty, Base, Difference,

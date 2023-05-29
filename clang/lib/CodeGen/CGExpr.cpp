@@ -848,7 +848,9 @@ void CodeGenFunction::EmitTypeCheck(TypeCheckKind TCK, SourceLocation Loc,
                                                                    CacheSize-1));
       llvm::Value *Indices[] = { Builder.getInt32(0), Slot };
       llvm::Value *CacheVal = Builder.CreateAlignedLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, 
-          IntPtrTy, Builder.CreateInBoundsGEP(HashTable, Cache, Indices),
+          IntPtrTy, CGM.getCodeGenOpts().DropInboundsFromGEP
+          ? Builder.CreateGEP(HashTable, Cache, Indices)
+          : Builder.CreateInBoundsGEP(HashTable, Cache, Indices),
           getPointerAlign());
 
       // If the hash isn't in the cache, call a runtime handler to perform the
@@ -1743,6 +1745,7 @@ llvm::Value *CodeGenFunction::EmitLoadOfScalar(Address Addr, bool Volatile,
                                                LValueBaseInfo BaseInfo,
                                                TBAAAccessInfo TBAAInfo,
                                                bool isNontemporal) {
+  Addr.withPointer(Addr.getPointer()->stripInBoundsOffsets());
   if (const auto *ClangVecTy = Ty->getAs<VectorType>()) {
     // Boolean vectors use `iN` as storage type.
     if (ClangVecTy->isExtVectorBoolType()) {
@@ -1801,9 +1804,10 @@ llvm::Value *CodeGenFunction::EmitLoadOfScalar(Address Addr, bool Volatile,
   if (EmitScalarRangeCheck(Load, Ty, Loc)) {
     // In order to prevent the optimizer from throwing away the check, don't
     // attach range metadata to the load.
-  } else if (CGM.getCodeGenOpts().OptimizationLevel > 0)
+  } else if (CGM.getCodeGenOpts().OptimizationLevel > 0) {
     if (llvm::MDNode *RangeInfo = getRangeForLoadFromType(Ty))
       Load->setMetadata(llvm::LLVMContext::MD_range, RangeInfo);
+  }
 
   return EmitFromMemory(Load, Ty);
 }
@@ -2093,9 +2097,9 @@ Address CodeGenFunction::EmitExtVectorElementLValue(LValue LV) {
   const llvm::Constant *Elts = LV.getExtVectorElts();
   unsigned ix = getAccessedFieldNo(0, Elts);
 
-  Address VectorBasePtrPlusIx =
-    Builder.CreateConstInBoundsGEP(CastToPointerElement, ix,
-                                   "vector.elt");
+  Address VectorBasePtrPlusIx = CGM.getCodeGenOpts().DropInboundsFromGEP
+    ? Builder.CreateConstGEP(CastToPointerElement, ix, "vector.elt")
+    : Builder.CreateConstInBoundsGEP(CastToPointerElement, ix, "vector.elt");
 
   return VectorBasePtrPlusIx;
 }
@@ -3638,7 +3642,9 @@ Address CodeGenFunction::EmitArrayToPointerDecay(const Expr *E,
   if (!E->getType()->isVariableArrayType()) {
     assert(isa<llvm::ArrayType>(Addr.getElementType()) &&
            "Expected pointer to array");
-    Addr = Builder.CreateConstArrayGEP(Addr, 0, "arraydecay");
+    Addr = CGM.getCodeGenOpts().DropInboundsFromGEP
+      ? Builder.CreateConstArrayGEPForceNoInBounds(Addr, 0, "arraydecay")
+      : Builder.CreateConstArrayGEP(Addr, 0, "arraydecay");
   }
 
   // The result of this decay conversion points to an array element within the
@@ -3677,6 +3683,9 @@ static llvm::Value *emitArraySubscriptGEP(CodeGenFunction &CGF,
                                           bool signedIndices,
                                           SourceLocation loc,
                                     const llvm::Twine &name = "arrayidx") {
+  if (CGF.CGM.getCodeGenOpts().DropInboundsFromGEP)
+    return CGF.Builder.CreateGEP(elemType, ptr, indices, name, true);
+    
   if (inbounds) {
     return CGF.EmitCheckedInBoundsGEP(elemType, ptr, indices, signedIndices,
                                       CodeGenFunction::NotSubtraction, loc,
@@ -3837,6 +3846,7 @@ LValue CodeGenFunction::EmitArraySubscriptExpr(const ArraySubscriptExpr *E,
 
   // All the other cases basically behave like simple offsetting.
 
+
   // Handle the extvector case we ignored above.
   if (isa<ExtVectorElementExpr>(E->getBase())) {
     LValue LV = EmitLValue(E->getBase());
@@ -3992,7 +4002,9 @@ static Address emitOMPArraySectionBase(CodeGenFunction &CGF, const Expr *Base,
       if (!BaseTy->isVariableArrayType()) {
         assert(isa<llvm::ArrayType>(Addr.getElementType()) &&
                "Expected pointer to array");
-        Addr = CGF.Builder.CreateConstArrayGEP(Addr, 0, "arraydecay");
+        Addr = CGF.CGM.getCodeGenOpts().DropInboundsFromGEP
+          ? CGF.Builder.CreateConstArrayGEPForceNoInBounds(Addr, 0, "arraydecay")
+          : CGF.Builder.CreateConstArrayGEP(Addr, 0, "arraydecay");
       }
 
       return CGF.Builder.CreateElementBitCast(Addr,
@@ -4312,7 +4324,9 @@ static Address emitAddrOfZeroSizeField(CodeGenFunction &CGF, Address Base,
   if (Offset.isZero())
     return Base;
   Base = CGF.Builder.CreateElementBitCast(Base, CGF.Int8Ty);
-  return CGF.Builder.CreateConstInBoundsByteGEP(Base, Offset);
+  return CGF.CGM.getCodeGenOpts().DropInboundsFromGEP
+    ? CGF.Builder.CreateConstByteGEP(Base, Offset)
+    : CGF.Builder.CreateConstInBoundsByteGEP(Base, Offset);
 }
 
 /// Drill down to the storage of a field without walking into
@@ -4404,7 +4418,9 @@ LValue CodeGenFunction::EmitLValueForField(LValue base,
     if (UseVolatile) {
       const unsigned VolatileOffset = Info.VolatileStorageOffset.getQuantity();
       if (VolatileOffset)
-        Addr = Builder.CreateConstInBoundsGEP(Addr, VolatileOffset);
+        Addr = CGM.getCodeGenOpts().DropInboundsFromGEP
+        ? Builder.CreateConstGEP(Addr, VolatileOffset)
+        : Builder.CreateConstInBoundsGEP(Addr, VolatileOffset);
     }
 
     QualType fieldType =

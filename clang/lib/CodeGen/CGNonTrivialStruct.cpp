@@ -366,8 +366,9 @@ template <class Derived> struct GenFuncBase {
     llvm::Value *SizeInBytes =
         CGF.Builder.CreateNUWMul(BaseEltSizeVal, NumElts);
     Address BC = CGF.Builder.CreateElementBitCast(DstAddr, CGF.CGM.Int8Ty);
-    llvm::Value *DstArrayEnd =
-        CGF.Builder.CreateInBoundsGEP(CGF.Int8Ty, BC.getPointer(), SizeInBytes);
+    llvm::Value *DstArrayEnd = CGF.CGM.getCodeGenOpts().DropInboundsFromGEP
+        ? CGF.Builder.CreateGEP(CGF.Int8Ty, BC.getPointer(), SizeInBytes)
+        : CGF.Builder.CreateInBoundsGEP(CGF.Int8Ty, BC.getPointer(), SizeInBytes);
     DstArrayEnd = CGF.Builder.CreateBitCast(
         DstArrayEnd, CGF.CGM.Int8PtrPtrTy, "dstarray.end");
     llvm::BasicBlock *PreheaderBB = CGF.Builder.GetInsertBlock();
@@ -427,7 +428,9 @@ template <class Derived> struct GenFuncBase {
     if (Offset.getQuantity() == 0)
       return Addr;
     Addr = CGF->Builder.CreateElementBitCast(Addr, CGF->CGM.Int8Ty);
-    Addr = CGF->Builder.CreateConstInBoundsGEP(Addr, Offset.getQuantity());
+    Addr = CGF->CGM.getCodeGenOpts().DropInboundsFromGEP
+      ? CGF->Builder.CreateConstGEP(Addr, Offset.getQuantity())
+      : CGF->Builder.CreateConstInBoundsGEP(Addr, Offset.getQuantity());
     return CGF->Builder.CreateElementBitCast(Addr, CGF->CGM.Int8PtrTy);
   }
 

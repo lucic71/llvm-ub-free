@@ -5114,6 +5114,10 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
                    options::OPT_fno_constrain_bool_value, true))
     CmdArgs.push_back("-fconstrain-bool-value");
 
+  if (!Args.hasFlag(options::OPT_fdrop_inbounds_from_gep,
+                   options::OPT_fno_drop_inbounds_from_gep, false))
+    CmdArgs.push_back("-fno-drop-inbounds-from-gep");
+
   if (!Args.hasFlag(options::OPT_fuse_default_alignment,
                    options::OPT_fno_use_default_alignment, true))
     CmdArgs.push_back("-fno-use-default-alignment");

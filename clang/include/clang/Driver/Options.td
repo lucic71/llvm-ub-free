@@ -1952,7 +1952,12 @@ defm use_default_alignment : BoolFOption<"use-default-alignment",
 defm constrain_bool_value : BoolFOption<"constrain-bool-value",
   CodeGenOpts<"ConstrainBoolValue">, DefaultFalse,
   NegFlag<SetFalse, [CC1Option], "Do not constrain bool values to {0,1}">,
-  PosFlag<SetTrue,  [CC1Option], "Constrain bool values to {0,1}">>;
+  PosFlag<SetTrue,  [CC1Option], "Constrain bool values to {0,1} (default)">>;
+
+defm drop_inbounds_from_gep : BoolFOption<"drop-inbounds-from-gep",
+  CodeGenOpts<"DropInboundsFromGEP">, DefaultTrue,
+  NegFlag<SetFalse, [CC1Option], "Do not drop inbounds from GEPs (default)">,
+  PosFlag<SetTrue,  [CC1Option], "Drop inbounds from GEPs">>;
 
 defm constrain_shift_value : BoolFOption<"constrain-shift-value",
   CodeGenOpts<"NoConstrainShiftValue">, DefaultFalse,

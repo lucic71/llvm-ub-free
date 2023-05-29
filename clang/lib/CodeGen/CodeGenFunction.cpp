@@ -1913,8 +1913,9 @@ static void emitNonZeroVLAInit(CodeGenFunction &CGF, QualType baseType,
 
   Address begin =
     Builder.CreateElementBitCast(dest, CGF.Int8Ty, "vla.begin");
-  llvm::Value *end = Builder.CreateInBoundsGEP(
-      begin.getElementType(), begin.getPointer(), sizeInChars, "vla.end");
+  llvm::Value *end = CGF.CGM.getCodeGenOpts().DropInboundsFromGEP
+    ? Builder.CreateGEP( begin.getElementType(), begin.getPointer(), sizeInChars, "vla.end")
+    : Builder.CreateInBoundsGEP( begin.getElementType(), begin.getPointer(), sizeInChars, "vla.end");
 
   llvm::BasicBlock *originBB = CGF.Builder.GetInsertBlock();
   llvm::BasicBlock *loopBB = CGF.createBasicBlock("vla-init.loop");
@@ -1940,8 +1941,9 @@ static void emitNonZeroVLAInit(CodeGenFunction &CGF, QualType baseType,
                        /*volatile*/ false);
 
   // Go to the next element.
-  llvm::Value *next =
-    Builder.CreateInBoundsGEP(CGF.Int8Ty, cur, baseSizeInChars, "vla.next");
+  llvm::Value *next = CGF.CGM.getCodeGenOpts().DropInboundsFromGEP
+    ? Builder.CreateGEP(CGF.Int8Ty, cur, baseSizeInChars, "vla.next")
+    : Builder.CreateInBoundsGEP(CGF.Int8Ty, cur, baseSizeInChars, "vla.next");
 
   // Leave if that's the end of the VLA.
   llvm::Value *done = Builder.CreateICmpEQ(next, end, "vla-init.isdone");
@@ -2130,8 +2132,9 @@ llvm::Value *CodeGenFunction::emitArrayLength(const ArrayType *origArrayType,
     addr = Builder.CreateElementBitCast(addr, baseType, "array.begin");
   } else {
     // Create the actual GEP.
-    addr = Address(Builder.CreateInBoundsGEP(
-        addr.getElementType(), addr.getPointer(), gepIndices, "array.begin"),
+    addr = Address(CGM.getCodeGenOpts().DropInboundsFromGEP
+        ? Builder.CreateGEP(addr.getElementType(), addr.getPointer(), gepIndices, "array.begin")
+        : Builder.CreateInBoundsGEP(addr.getElementType(), addr.getPointer(), gepIndices, "array.begin"),
         ConvertTypeForMem(eltType),
         addr.getAlignment());
   }

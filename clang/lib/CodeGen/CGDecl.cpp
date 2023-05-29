@@ -952,7 +952,9 @@ static void emitStoresForInitAfterBZero(CodeGenModule &CGM,
       // If necessary, get a pointer to the element and emit it.
       if (!Elt->isNullValue() && !isa<llvm::UndefValue>(Elt))
         emitStoresForInitAfterBZero(
-            CGM, Elt, Builder.CreateConstInBoundsGEP2_32(Loc, 0, i), isVolatile,
+            CGM, Elt,
+            CGM.getCodeGenOpts().DropInboundsFromGEP ? Builder.CreateConstGEP2_32(Loc, 0, i) : Builder.CreateConstInBoundsGEP2_32(Loc, 0, i) ,
+            isVolatile,
             Builder, IsAutoInit);
     }
     return;
@@ -967,7 +969,7 @@ static void emitStoresForInitAfterBZero(CodeGenModule &CGM,
     // If necessary, get a pointer to the element and emit it.
     if (!Elt->isNullValue() && !isa<llvm::UndefValue>(Elt))
       emitStoresForInitAfterBZero(CGM, Elt,
-                                  Builder.CreateConstInBoundsGEP2_32(Loc, 0, i),
+                                  CGM.getCodeGenOpts().DropInboundsFromGEP ? Builder.CreateConstGEP2_32(Loc, 0, i) : Builder.CreateConstInBoundsGEP2_32(Loc, 0, i) ,
                                   isVolatile, Builder, IsAutoInit);
   }
 }
@@ -1242,7 +1244,9 @@ static void emitStoresForConstant(CodeGenModule &CGM, const VarDecl &D,
       // FIXME: handle the case when ATy != Loc.getElementType().
       if (ATy == Loc.getElementType()) {
         for (unsigned i = 0; i != ATy->getNumElements(); i++) {
-          Address EltPtr = Builder.CreateConstArrayGEP(Loc, i);
+          Address EltPtr = CGM.getCodeGenOpts().DropInboundsFromGEP
+            ? Builder.CreateConstArrayGEPForceNoInBounds(Loc, i)
+            : Builder.CreateConstArrayGEP(Loc, i);
           emitStoresForConstant(
               CGM, D, EltPtr, isVolatile, Builder,
               cast<llvm::Constant>(Builder.CreateExtractValue(constant, i)),
@@ -1788,8 +1792,9 @@ void CodeGenFunction::emitZeroOrPatternForAutoVarInit(QualType type,
     llvm::Value *BaseSizeInChars =
         llvm::ConstantInt::get(IntPtrTy, EltSize.getQuantity());
     Address Begin = Builder.CreateElementBitCast(Loc, Int8Ty, "vla.begin");
-    llvm::Value *End = Builder.CreateInBoundsGEP(
-        Begin.getElementType(), Begin.getPointer(), SizeVal, "vla.end");
+    llvm::Value *End =CGM.getCodeGenOpts().DropInboundsFromGEP
+      ? Builder.CreateGEP( Begin.getElementType(), Begin.getPointer(), SizeVal, "vla.end")
+      : Builder.CreateInBoundsGEP( Begin.getElementType(), Begin.getPointer(), SizeVal, "vla.end");
     llvm::BasicBlock *OriginBB = Builder.GetInsertBlock();
     EmitBlock(LoopBB);
     llvm::PHINode *Cur = Builder.CreatePHI(Begin.getType(), 2, "vla.cur");
@@ -1801,8 +1806,9 @@ void CodeGenFunction::emitZeroOrPatternForAutoVarInit(QualType type,
                                  CGM, D, Builder, Constant, ConstantAlign),
                              BaseSizeInChars, isVolatile);
     I->addAnnotationMetadata("auto-init");
-    llvm::Value *Next =
-        Builder.CreateInBoundsGEP(Int8Ty, Cur, BaseSizeInChars, "vla.next");
+    llvm::Value *Next = CGM.getCodeGenOpts().DropInboundsFromGEP
+        ? Builder.CreateGEP(Int8Ty, Cur, BaseSizeInChars, "vla.next")
+        : Builder.CreateInBoundsGEP(Int8Ty, Cur, BaseSizeInChars, "vla.next");
     llvm::Value *Done = Builder.CreateICmpEQ(Next, End, "vla-init.isdone");
     Builder.CreateCondBr(Done, ContBB, LoopBB);
     Cur->addIncoming(Next, LoopBB);
@@ -2216,8 +2222,9 @@ void CodeGenFunction::emitDestroy(Address addr, QualType type,
   }
 
   llvm::Value *begin = addr.getPointer();
-  llvm::Value *end =
-      Builder.CreateInBoundsGEP(addr.getElementType(), begin, length);
+  llvm::Value *end = CGM.getCodeGenOpts().DropInboundsFromGEP
+      ? Builder.CreateGEP(addr.getElementType(), begin, length)
+      : Builder.CreateInBoundsGEP(addr.getElementType(), begin, length);
   emitArrayDestroy(begin, end, type, elementAlign, destroyer,
                    checkZeroLength, useEHCleanupForArray);
 }
@@ -2262,8 +2269,9 @@ void CodeGenFunction::emitArrayDestroy(llvm::Value *begin,
   // Shift the address back by one element.
   llvm::Value *negativeOne = llvm::ConstantInt::get(SizeTy, -1, true);
   llvm::Type *llvmElementType = ConvertTypeForMem(elementType);
-  llvm::Value *element = Builder.CreateInBoundsGEP(
-      llvmElementType, elementPast, negativeOne, "arraydestroy.element");
+  llvm::Value *element = CGM.getCodeGenOpts().DropInboundsFromGEP
+    ? Builder.CreateGEP( llvmElementType, elementPast, negativeOne, "arraydestroy.element")
+    : Builder.CreateInBoundsGEP( llvmElementType, elementPast, negativeOne, "arraydestroy.element");
 
   if (useEHCleanup)
     pushRegularPartialArrayCleanup(begin, element, elementType, elementAlign,
@@ -2306,10 +2314,13 @@ static void emitPartialArrayDestroy(CodeGenFunction &CGF,
     llvm::Value *zero = llvm::ConstantInt::get(CGF.SizeTy, 0);
 
     SmallVector<llvm::Value*,4> gepIndices(arrayDepth+1, zero);
-    begin = CGF.Builder.CreateInBoundsGEP(
-        elemTy, begin, gepIndices, "pad.arraybegin");
-    end = CGF.Builder.CreateInBoundsGEP(
-        elemTy, end, gepIndices, "pad.arrayend");
+    begin = CGF.CGM.getCodeGenOpts().DropInboundsFromGEP
+      ? CGF.Builder.CreateGEP( elemTy, begin, gepIndices, "pad.arraybegin")
+      : CGF.Builder.CreateInBoundsGEP( elemTy, begin, gepIndices, "pad.arraybegin");
+
+    end = CGF.CGM.getCodeGenOpts().DropInboundsFromGEP
+      ? CGF.Builder.CreateGEP( elemTy, end, gepIndices, "pad.arrayend")
+      : CGF.Builder.CreateInBoundsGEP( elemTy, end, gepIndices, "pad.arrayend");
   }
 
   // Destroy the array.  We don't ever need an EH cleanup because we

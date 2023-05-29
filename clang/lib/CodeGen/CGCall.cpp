@@ -1419,8 +1419,9 @@ static Address emitAddressAtOffset(CodeGenFunction &CGF, Address addr,
                                    const ABIArgInfo &info) {
   if (unsigned offset = info.getDirectOffset()) {
     addr = CGF.Builder.CreateElementBitCast(addr, CGF.Int8Ty);
-    addr = CGF.Builder.CreateConstInBoundsByteGEP(addr,
-                                             CharUnits::fromQuantity(offset));
+    addr = CGF.CGM.getCodeGenOpts().DropInboundsFromGEP
+      ? CGF.Builder.CreateConstByteGEP(addr, CharUnits::fromQuantity(offset))
+      : CGF.Builder.CreateConstInBoundsByteGEP(addr, CharUnits::fromQuantity(offset));
     addr = CGF.Builder.CreateElementBitCast(addr, info.getCoerceToType());
   }
   return addr;

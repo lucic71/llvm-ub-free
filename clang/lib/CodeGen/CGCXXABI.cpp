@@ -261,8 +261,9 @@ void CGCXXABI::ReadArrayCookie(CodeGenFunction &CGF, Address ptr,
   }
 
   cookieSize = getArrayCookieSizeImpl(eltTy);
-  Address allocAddr =
-    CGF.Builder.CreateConstInBoundsByteGEP(ptr, -cookieSize);
+  Address allocAddr = CGF.CGM.getCodeGenOpts().DropInboundsFromGEP
+    ? CGF.Builder.CreateConstByteGEP(ptr, -cookieSize)
+    : CGF.Builder.CreateConstInBoundsByteGEP(ptr, -cookieSize);
   allocPtr = allocAddr.getPointer();
   numElements = readArrayCookieImpl(CGF, allocAddr, cookieSize);
 }

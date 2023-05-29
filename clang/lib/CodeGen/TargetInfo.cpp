@@ -72,8 +72,9 @@ static void AssignToArrayRange(CodeGenModule& CGM, CodeGen::CGBuilderTy &Builder
                                unsigned LastIndex) {
   // Alternatively, we could emit this as a loop in the source.
   for (unsigned I = FirstIndex; I <= LastIndex; ++I) {
-    llvm::Value *Cell =
-        Builder.CreateConstInBoundsGEP1_32(Builder.getInt8Ty(), Array, I);
+    llvm::Value *Cell = CGM.getCodeGenOpts().DropInboundsFromGEP
+        ? Builder.CreateConstGEP1_32(Builder.getInt8Ty(), Array, I)
+        : Builder.CreateConstInBoundsGEP1_32(Builder.getInt8Ty(), Array, I);
     Builder.CreateAlignedStore(!CGM.getCodeGenOpts().UseDefaultAlignment, Value, Cell, CharUnits::One());
   }
 }
@@ -342,15 +343,18 @@ static Address emitVoidPtrDirectVAArg(CodeGenFunction &CGF,
 
   // Advance the pointer past the argument, then store that back.
   CharUnits FullDirectSize = DirectSize.alignTo(SlotSize);
-  Address NextPtr =
-      CGF.Builder.CreateConstInBoundsByteGEP(Addr, FullDirectSize, "argp.next");
+  Address NextPtr = CGF.CGM.getCodeGenOpts().DropInboundsFromGEP
+      ? CGF.Builder.CreateConstByteGEP(Addr, FullDirectSize, "argp.next")
+      : CGF.Builder.CreateConstInBoundsByteGEP(Addr, FullDirectSize, "argp.next");
   CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, NextPtr.getPointer(), VAListAddr);
 
   // If the argument is smaller than a slot, and this is a big-endian
   // target, the argument will be right-adjusted in its slot.
   if (DirectSize < SlotSize && CGF.CGM.getDataLayout().isBigEndian() &&
       !DirectTy->isStructTy()) {
-    Addr = CGF.Builder.CreateConstInBoundsByteGEP(Addr, SlotSize - DirectSize);
+    Addr = CGF.CGM.getCodeGenOpts().DropInboundsFromGEP
+      ? CGF.Builder.CreateConstByteGEP(Addr, SlotSize - DirectSize)
+      : CGF.Builder.CreateConstInBoundsByteGEP(Addr, SlotSize - DirectSize);
   }
 
   Addr = CGF.Builder.CreateElementBitCast(Addr, DirectTy);
@@ -411,12 +415,16 @@ static Address complexTempStructure(CodeGenFunction &CGF, Address VAListAddr,
   Address RealAddr = Addr;
   Address ImagAddr = RealAddr;
   if (CGF.CGM.getDataLayout().isBigEndian()) {
-    RealAddr =
-        CGF.Builder.CreateConstInBoundsByteGEP(RealAddr, SlotSize - EltSize);
-    ImagAddr = CGF.Builder.CreateConstInBoundsByteGEP(ImagAddr,
-                                                      2 * SlotSize - EltSize);
+    RealAddr = CGF.CGM.getCodeGenOpts().DropInboundsFromGEP
+        ? CGF.Builder.CreateConstByteGEP(RealAddr, SlotSize - EltSize)
+        : CGF.Builder.CreateConstInBoundsByteGEP(RealAddr, SlotSize - EltSize);
+    ImagAddr = CGF.CGM.getCodeGenOpts().DropInboundsFromGEP
+      ? CGF.Builder.CreateConstInBoundsByteGEP(ImagAddr, 2 * SlotSize - EltSize)
+      : CGF.Builder.CreateConstInBoundsByteGEP(ImagAddr, 2 * SlotSize - EltSize);
   } else {
-    ImagAddr = CGF.Builder.CreateConstInBoundsByteGEP(RealAddr, SlotSize);
+    RealAddr = CGF.CGM.getCodeGenOpts().DropInboundsFromGEP
+        ? CGF.Builder.CreateConstByteGEP(RealAddr, SlotSize)
+        : CGF.Builder.CreateConstInBoundsByteGEP(RealAddr, SlotSize);
   }
 
   llvm::Type *EltTy = CGF.ConvertTypeForMem(CTy->getElementType());
@@ -2210,7 +2218,10 @@ bool X86_32TargetCodeGenInfo::initDwarfEHRegSizeTable(
     // 9 is %eflags, which doesn't get a size on Darwin for some
     // reason.
     Builder.CreateAlignedStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, 
-        Four8, Builder.CreateConstInBoundsGEP1_32(CGF.Int8Ty, Address, 9),
+        Four8,
+        CGF.CGM.getCodeGenOpts().DropInboundsFromGEP
+        ? Builder.CreateConstGEP1_32(CGF.Int8Ty, Address, 9)
+        : Builder.CreateConstInBoundsGEP1_32(CGF.Int8Ty, Address, 9),
                                CharUnits::One());
 
     // 11-16 are st(0..5).  Not sure why we stop at 5.
@@ -4219,9 +4230,9 @@ Address X86_64ABIInfo::EmitVAArg(CodeGenFunction &CGF, Address VAListAddr,
     Address RegAddrLo = Address(CGF.Builder.CreateGEP(CGF.Int8Ty, RegSaveArea,
                                                       fp_offset),
                                 CGF.Int8Ty, CharUnits::fromQuantity(16));
-    Address RegAddrHi =
-      CGF.Builder.CreateConstInBoundsByteGEP(RegAddrLo,
-                                             CharUnits::fromQuantity(16));
+    Address RegAddrHi = CGF.CGM.getCodeGenOpts().DropInboundsFromGEP
+      ? CGF.Builder.CreateConstByteGEP(RegAddrLo, CharUnits::fromQuantity(16))
+      : CGF.Builder.CreateConstInBoundsByteGEP(RegAddrLo, CharUnits::fromQuantity(16));
     llvm::Type *ST = AI.canHaveCoerceToType()
                          ? AI.getCoerceToType()
                          : llvm::StructType::get(CGF.DoubleTy, CGF.DoubleTy);

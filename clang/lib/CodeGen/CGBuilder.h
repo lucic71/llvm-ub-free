@@ -250,6 +250,27 @@ public:
         ElTy->getElementType(Index),
         Addr.getAlignment().alignmentAtOffset(Offset));
   }
+  /// Given
+  ///   %addr = [n x T]* ...
+  /// produce
+  ///   %name = getelementptr %addr, i64 0, i64 index
+  /// where i64 is actually the target word size.
+  ///
+  /// This API assumes that drilling into an array like this is always
+  /// an inbounds operation.
+  Address CreateConstArrayGEPForceNoInBounds(Address Addr, uint64_t Index,
+                              const llvm::Twine &Name = "") {
+    llvm::ArrayType *ElTy = cast<llvm::ArrayType>(Addr.getElementType());
+    const llvm::DataLayout &DL = BB->getParent()->getParent()->getDataLayout();
+    CharUnits EltSize =
+        CharUnits::fromQuantity(DL.getTypeAllocSize(ElTy->getElementType()));
+
+    return Address(
+        CreateGEP(Addr.getElementType(), Addr.getPointer(),
+                          {getSize(CharUnits::Zero()), getSize(Index)}, Name),
+        ElTy->getElementType(),
+        Addr.getAlignment().alignmentAtOffset(Index * EltSize));
+  }
 
   /// Given
   ///   %addr = [n x T]* ...
@@ -339,6 +360,24 @@ public:
                    Addr.getElementType(),
                    Addr.getAlignment().alignmentAtOffset(Offset));
   }
+
+  using CGBuilderBaseTy::CreateConstGEP2_32;
+  Address CreateConstGEP2_32(Address Addr, unsigned Idx0, unsigned Idx1,
+                                     const llvm::Twine &Name = "") {
+    const llvm::DataLayout &DL = BB->getParent()->getParent()->getDataLayout();
+
+    auto *GEP = cast<llvm::GetElementPtrInst>(CreateConstGEP2_32(
+        Addr.getElementType(), Addr.getPointer(), Idx0, Idx1, Name));
+    llvm::APInt Offset(
+        DL.getIndexSizeInBits(Addr.getType()->getPointerAddressSpace()), 0,
+        /*isSigned=*/true);
+    if (!GEP->accumulateConstantOffset(DL, Offset))
+      llvm_unreachable("offset of GEP with constants is always computable");
+    return Address(GEP, GEP->getResultElementType(),
+                   Addr.getAlignment().alignmentAtOffset(
+                       CharUnits::fromQuantity(Offset.getSExtValue())));
+  }
+
 
   using CGBuilderBaseTy::CreateConstInBoundsGEP2_32;
   Address CreateConstInBoundsGEP2_32(Address Addr, unsigned Idx0, unsigned Idx1,
