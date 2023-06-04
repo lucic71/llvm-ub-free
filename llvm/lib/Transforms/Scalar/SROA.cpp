@@ -112,6 +112,9 @@ STATISTIC(NumVectorized, "Number of vectorized aggregates");
 static cl::opt<bool> SROAStrictInbounds("sroa-strict-inbounds", cl::init(false),
                                         cl::Hidden);
 
+// TODO: would be a good idea to enable sroa-strict-inbounds while having this flag enabled
+cl::opt<bool> TrapOnOOB("trap-on-oob", cl::init(false));
+
 namespace {
 
 /// A custom IRBuilder inserter which prefixes all names, but only in
@@ -673,6 +676,11 @@ private:
                         << AllocSize << " byte alloca:\n"
                         << "    alloca: " << AS.AI << "\n"
                         << "       use: " << I << "\n");
+      if (TrapOnOOB) {
+        Function *TrapFn =
+          Intrinsic::getDeclaration(I.getParent()->getParent()->getParent(), Intrinsic::trap);
+        CallInst::Create(TrapFn, "", &I);
+      }
       return markAsDead(I);
     }
 
@@ -752,8 +760,14 @@ private:
         // If this index has computed an intermediate pointer which is not
         // inbounds, then the result of the GEP is a poison value and we can
         // delete it and all uses.
-        if (GEPOffset.ugt(AllocSize))
+        if (GEPOffset.ugt(AllocSize)) {
+          if (TrapOnOOB) {
+            Function *TrapFn =
+              Intrinsic::getDeclaration(GEPI.getParent()->getParent()->getParent(), Intrinsic::trap);
+            CallInst::Create(TrapFn, "", &GEPI);
+          }
           return markAsDead(GEPI);
+        }
       }
     }
 
@@ -818,6 +832,11 @@ private:
                         << AllocSize << " byte alloca:\n"
                         << "    alloca: " << AS.AI << "\n"
                         << "       use: " << SI << "\n");
+      if (TrapOnOOB) {
+        Function *TrapFn =
+          Intrinsic::getDeclaration(SI.getParent()->getParent()->getParent(), Intrinsic::trap);
+        CallInst::Create(TrapFn, "", &SI);
+      }
       return markAsDead(SI);
     }
 
@@ -830,9 +849,15 @@ private:
     assert(II.getRawDest() == *U && "Pointer use is not the destination?");
     ConstantInt *Length = dyn_cast<ConstantInt>(II.getLength());
     if ((Length && Length->getValue() == 0) ||
-        (IsOffsetKnown && Offset.uge(AllocSize)))
+        (IsOffsetKnown && Offset.uge(AllocSize))) {
       // Zero-length mem transfer intrinsics can be ignored entirely.
+      if (TrapOnOOB) {
+        Function *TrapFn =
+          Intrinsic::getDeclaration(II.getParent()->getParent()->getParent(), Intrinsic::trap);
+        CallInst::Create(TrapFn, "", &II);
+      }
       return markAsDead(II);
+    }
 
     if (!IsOffsetKnown)
       return PI.setAborted(&II);
@@ -878,6 +903,11 @@ private:
           MemTransferSliceMap.find(&II);
       if (MTPI != MemTransferSliceMap.end())
         AS.Slices[MTPI->second].kill();
+      if (TrapOnOOB) {
+        Function *TrapFn =
+          Intrinsic::getDeclaration(II.getParent()->getParent()->getParent(), Intrinsic::trap);
+        CallInst::Create(TrapFn, "", &II);
+      }
       return markAsDead(II);
     }
 
