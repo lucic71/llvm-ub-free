@@ -676,7 +676,7 @@ private:
                         << AllocSize << " byte alloca:\n"
                         << "    alloca: " << AS.AI << "\n"
                         << "       use: " << I << "\n");
-      if (TrapOnOOB) {
+      if (TrapOnOOB && Offset.uge(AllocSize)) {
         Function *TrapFn =
           Intrinsic::getDeclaration(I.getParent()->getParent()->getParent(), Intrinsic::trap);
         CallInst::Create(TrapFn, "", &I);
@@ -851,7 +851,7 @@ private:
     if ((Length && Length->getValue() == 0) ||
         (IsOffsetKnown && Offset.uge(AllocSize))) {
       // Zero-length mem transfer intrinsics can be ignored entirely.
-      if (TrapOnOOB) {
+      if (TrapOnOOB && (IsOffsetKnown && Offset.uge(AllocSize))) {
         Function *TrapFn =
           Intrinsic::getDeclaration(II.getParent()->getParent()->getParent(), Intrinsic::trap);
         CallInst::Create(TrapFn, "", &II);
