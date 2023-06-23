@@ -66,6 +66,7 @@ using namespace llvm;
 /// Enable analysis of recursive PHI nodes.
 static cl::opt<bool> EnableRecPhiAnalysis("basic-aa-recphi", cl::Hidden,
                                           cl::init(true));
+static cl::opt<bool> DisableOOBAnalysis("disable-oob-analysis", cl::init(false));
 
 /// SearchLimitReached / SearchTimes shows how often the limit of
 /// to decompose GEPs is reached. It will affect the precision
@@ -1125,19 +1126,20 @@ AliasResult BasicAAResult::aliasGEP(
   // symbolic difference.
   subtractDecomposedGEPs(DecompGEP1, DecompGEP2);
 
-  // If an inbounds GEP would have to start from an out of bounds address
-  // for the two to alias, then we can assume noalias.
-  if (*DecompGEP1.InBounds && DecompGEP1.VarIndices.empty() &&
-      V2Size.hasValue() && DecompGEP1.Offset.sge(V2Size.getValue()) &&
-      isBaseOfObject(DecompGEP2.Base))
-    return AliasResult::NoAlias;
-
-  if (isa<GEPOperator>(V2)) {
-    // Symmetric case to above.
-    if (*DecompGEP2.InBounds && DecompGEP1.VarIndices.empty() &&
-        V1Size.hasValue() && DecompGEP1.Offset.sle(-V1Size.getValue()) &&
-        isBaseOfObject(DecompGEP1.Base))
+  if (!DisableOOBAnalysis) {
+    // If an inbounds GEP would have to start from an out of bounds address
+    // for the two to alias, then we can assume noalias.
+    if (*DecompGEP1.InBounds && DecompGEP1.VarIndices.empty() &&
+        V2Size.hasValue() && DecompGEP1.Offset.sge(V2Size.getValue()) &&
+        isBaseOfObject(DecompGEP2.Base))
       return AliasResult::NoAlias;
+
+    if (isa<GEPOperator>(V2))
+      // Symmetric case to above.
+      if (*DecompGEP2.InBounds && DecompGEP1.VarIndices.empty() &&
+          V1Size.hasValue() && DecompGEP1.Offset.sle(-V1Size.getValue()) &&
+          isBaseOfObject(DecompGEP1.Base))
+        return AliasResult::NoAlias;
   }
 
   // For GEPs with identical offsets, we can preserve the size and AAInfo
@@ -1204,128 +1206,133 @@ AliasResult BasicAAResult::aliasGEP(
       }
       return AR;
     }
-    return AliasResult::NoAlias;
+    if (!DisableOOBAnalysis)
+      return AliasResult::NoAlias;
   }
 
   // We need to know both acess sizes for all the following heuristics.
   if (!V1Size.hasValue() || !V2Size.hasValue())
     return AliasResult::MayAlias;
 
-  APInt GCD;
-  ConstantRange OffsetRange = ConstantRange(DecompGEP1.Offset);
-  for (unsigned i = 0, e = DecompGEP1.VarIndices.size(); i != e; ++i) {
-    const VariableGEPIndex &Index = DecompGEP1.VarIndices[i];
-    const APInt &Scale = Index.Scale;
-    APInt ScaleForGCD = Scale;
-    if (!Index.IsNSW)
-      ScaleForGCD = APInt::getOneBitSet(Scale.getBitWidth(),
-                                        Scale.countTrailingZeros());
+  if (!DisableOOBAnalysis) {
+    APInt GCD;
+    ConstantRange OffsetRange = ConstantRange(DecompGEP1.Offset);
+    for (unsigned i = 0, e = DecompGEP1.VarIndices.size(); i != e; ++i) {
+      const VariableGEPIndex &Index = DecompGEP1.VarIndices[i];
+      const APInt &Scale = Index.Scale;
+      APInt ScaleForGCD = Scale;
+      if (!Index.IsNSW)
+        ScaleForGCD = APInt::getOneBitSet(Scale.getBitWidth(),
+                                          Scale.countTrailingZeros());
 
-    if (i == 0)
-      GCD = ScaleForGCD.abs();
-    else
-      GCD = APIntOps::GreatestCommonDivisor(GCD, ScaleForGCD.abs());
+      if (i == 0)
+        GCD = ScaleForGCD.abs();
+      else
+        GCD = APIntOps::GreatestCommonDivisor(GCD, ScaleForGCD.abs());
 
-    ConstantRange CR = computeConstantRange(Index.Val.V, /* ForSigned */ false,
-                                            true, &AC, Index.CxtI);
-    KnownBits Known =
-        computeKnownBits(Index.Val.V, DL, 0, &AC, Index.CxtI, DT);
-    CR = CR.intersectWith(
-        ConstantRange::fromKnownBits(Known, /* Signed */ true),
-        ConstantRange::Signed);
-    CR = Index.Val.evaluateWith(CR).sextOrTrunc(OffsetRange.getBitWidth());
+      ConstantRange CR = computeConstantRange(Index.Val.V, /* ForSigned */ false,
+                                              true, &AC, Index.CxtI);
+      KnownBits Known =
+          computeKnownBits(Index.Val.V, DL, 0, &AC, Index.CxtI, DT);
+      CR = CR.intersectWith(
+          ConstantRange::fromKnownBits(Known, /* Signed */ true),
+          ConstantRange::Signed);
+      CR = Index.Val.evaluateWith(CR).sextOrTrunc(OffsetRange.getBitWidth());
 
-    assert(OffsetRange.getBitWidth() == Scale.getBitWidth() &&
-           "Bit widths are normalized to MaxIndexSize");
-    if (Index.IsNSW)
-      OffsetRange = OffsetRange.add(CR.smul_sat(ConstantRange(Scale)));
-    else
-      OffsetRange = OffsetRange.add(CR.smul_fast(ConstantRange(Scale)));
-  }
-
-  // We now have accesses at two offsets from the same base:
-  //  1. (...)*GCD + DecompGEP1.Offset with size V1Size
-  //  2. 0 with size V2Size
-  // Using arithmetic modulo GCD, the accesses are at
-  // [ModOffset..ModOffset+V1Size) and [0..V2Size). If the first access fits
-  // into the range [V2Size..GCD), then we know they cannot overlap.
-  APInt ModOffset = DecompGEP1.Offset.srem(GCD);
-  if (ModOffset.isNegative())
-    ModOffset += GCD; // We want mod, not rem.
-  if (ModOffset.uge(V2Size.getValue()) &&
-      (GCD - ModOffset).uge(V1Size.getValue()))
-    return AliasResult::NoAlias;
-
-  // Compute ranges of potentially accessed bytes for both accesses. If the
-  // interseciton is empty, there can be no overlap.
-  unsigned BW = OffsetRange.getBitWidth();
-  ConstantRange Range1 = OffsetRange.add(
-      ConstantRange(APInt(BW, 0), APInt(BW, V1Size.getValue())));
-  ConstantRange Range2 =
-      ConstantRange(APInt(BW, 0), APInt(BW, V2Size.getValue()));
-  if (Range1.intersectWith(Range2).isEmptySet())
-    return AliasResult::NoAlias;
-
-  // Try to determine the range of values for VarIndex such that
-  // VarIndex <= -MinAbsVarIndex || MinAbsVarIndex <= VarIndex.
-  Optional<APInt> MinAbsVarIndex;
-  if (DecompGEP1.VarIndices.size() == 1) {
-    // VarIndex = Scale*V.
-    const VariableGEPIndex &Var = DecompGEP1.VarIndices[0];
-    if (Var.Val.TruncBits == 0 &&
-        isKnownNonZero(Var.Val.V, DL, 0, &AC, Var.CxtI, DT)) {
-      // If V != 0, then abs(VarIndex) > 0.
-      MinAbsVarIndex = APInt(Var.Scale.getBitWidth(), 1);
-
-      // Check if abs(V*Scale) >= abs(Scale) holds in the presence of
-      // potentially wrapping math.
-      auto MultiplyByScaleNoWrap = [](const VariableGEPIndex &Var) {
-        if (Var.IsNSW)
-          return true;
-
-        int ValOrigBW = Var.Val.V->getType()->getPrimitiveSizeInBits();
-        // If Scale is small enough so that abs(V*Scale) >= abs(Scale) holds.
-        // The max value of abs(V) is 2^ValOrigBW - 1. Multiplying with a
-        // constant smaller than 2^(bitwidth(Val) - ValOrigBW) won't wrap.
-        int MaxScaleValueBW = Var.Val.getBitWidth() - ValOrigBW;
-        if (MaxScaleValueBW <= 0)
-          return false;
-        return Var.Scale.ule(
-            APInt::getMaxValue(MaxScaleValueBW).zext(Var.Scale.getBitWidth()));
-      };
-      // Refine MinAbsVarIndex, if abs(Scale*V) >= abs(Scale) holds in the
-      // presence of potentially wrapping math.
-      if (MultiplyByScaleNoWrap(Var)) {
-        // If V != 0 then abs(VarIndex) >= abs(Scale).
-        MinAbsVarIndex = Var.Scale.abs();
-      }
+      assert(OffsetRange.getBitWidth() == Scale.getBitWidth() &&
+             "Bit widths are normalized to MaxIndexSize");
+      if (Index.IsNSW)
+        OffsetRange = OffsetRange.add(CR.smul_sat(ConstantRange(Scale)));
+      else
+        OffsetRange = OffsetRange.add(CR.smul_fast(ConstantRange(Scale)));
     }
-  } else if (DecompGEP1.VarIndices.size() == 2) {
-    // VarIndex = Scale*V0 + (-Scale)*V1.
-    // If V0 != V1 then abs(VarIndex) >= abs(Scale).
-    // Check that VisitedPhiBBs is empty, to avoid reasoning about
-    // inequality of values across loop iterations.
-    const VariableGEPIndex &Var0 = DecompGEP1.VarIndices[0];
-    const VariableGEPIndex &Var1 = DecompGEP1.VarIndices[1];
-    if (Var0.Scale == -Var1.Scale && Var0.Val.TruncBits == 0 &&
-        Var0.Val.hasSameCastsAs(Var1.Val) && VisitedPhiBBs.empty() &&
-        isKnownNonEqual(Var0.Val.V, Var1.Val.V, DL, &AC, /* CxtI */ nullptr,
-                        DT))
-      MinAbsVarIndex = Var0.Scale.abs();
-  }
 
-  if (MinAbsVarIndex) {
-    // The constant offset will have added at least +/-MinAbsVarIndex to it.
-    APInt OffsetLo = DecompGEP1.Offset - *MinAbsVarIndex;
-    APInt OffsetHi = DecompGEP1.Offset + *MinAbsVarIndex;
-    // We know that Offset <= OffsetLo || Offset >= OffsetHi
-    if (OffsetLo.isNegative() && (-OffsetLo).uge(V1Size.getValue()) &&
-        OffsetHi.isNonNegative() && OffsetHi.uge(V2Size.getValue()))
+    // We now have accesses at two offsets from the same base:
+    //  1. (...)*GCD + DecompGEP1.Offset with size V1Size
+    //  2. 0 with size V2Size
+    // Using arithmetic modulo GCD, the accesses are at
+    // [ModOffset..ModOffset+V1Size) and [0..V2Size). If the first access fits
+    // into the range [V2Size..GCD), then we know they cannot overlap.
+    APInt ModOffset = DecompGEP1.Offset.srem(GCD);
+    ModOffset.dump(); GCD.dump();
+    if (ModOffset.isNegative())
+      ModOffset += GCD; // We want mod, not rem.
+    if (ModOffset.uge(V2Size.getValue()) &&
+        (GCD - ModOffset).uge(V1Size.getValue()))
+      return AliasResult::NoAlias;
+
+    // Compute ranges of potentially accessed bytes for both accesses. If the
+    // interseciton is empty, there can be no overlap.
+    unsigned BW = OffsetRange.getBitWidth();
+    ConstantRange Range1 = OffsetRange.add(
+        ConstantRange(APInt(BW, 0), APInt(BW, V1Size.getValue())));
+    ConstantRange Range2 =
+        ConstantRange(APInt(BW, 0), APInt(BW, V2Size.getValue()));
+    if (Range1.intersectWith(Range2).isEmptySet())
+      return AliasResult::NoAlias;
+
+    // Try to determine the range of values for VarIndex such that
+    // VarIndex <= -MinAbsVarIndex || MinAbsVarIndex <= VarIndex.
+    Optional<APInt> MinAbsVarIndex;
+    if (DecompGEP1.VarIndices.size() == 1) {
+      // VarIndex = Scale*V.
+      const VariableGEPIndex &Var = DecompGEP1.VarIndices[0];
+      if (Var.Val.TruncBits == 0 &&
+          isKnownNonZero(Var.Val.V, DL, 0, &AC, Var.CxtI, DT)) {
+        // If V != 0, then abs(VarIndex) > 0.
+        MinAbsVarIndex = APInt(Var.Scale.getBitWidth(), 1);
+
+        // Check if abs(V*Scale) >= abs(Scale) holds in the presence of
+        // potentially wrapping math.
+        auto MultiplyByScaleNoWrap = [](const VariableGEPIndex &Var) {
+          if (Var.IsNSW)
+            return true;
+
+          int ValOrigBW = Var.Val.V->getType()->getPrimitiveSizeInBits();
+          // If Scale is small enough so that abs(V*Scale) >= abs(Scale) holds.
+          // The max value of abs(V) is 2^ValOrigBW - 1. Multiplying with a
+          // constant smaller than 2^(bitwidth(Val) - ValOrigBW) won't wrap.
+          int MaxScaleValueBW = Var.Val.getBitWidth() - ValOrigBW;
+          if (MaxScaleValueBW <= 0)
+            return false;
+          return Var.Scale.ule(
+              APInt::getMaxValue(MaxScaleValueBW).zext(Var.Scale.getBitWidth()));
+        };
+        // Refine MinAbsVarIndex, if abs(Scale*V) >= abs(Scale) holds in the
+        // presence of potentially wrapping math.
+        if (MultiplyByScaleNoWrap(Var)) {
+          // If V != 0 then abs(VarIndex) >= abs(Scale).
+          MinAbsVarIndex = Var.Scale.abs();
+        }
+      }
+    } else if (DecompGEP1.VarIndices.size() == 2) {
+      // VarIndex = Scale*V0 + (-Scale)*V1.
+      // If V0 != V1 then abs(VarIndex) >= abs(Scale).
+      // Check that VisitedPhiBBs is empty, to avoid reasoning about
+      // inequality of values across loop iterations.
+      const VariableGEPIndex &Var0 = DecompGEP1.VarIndices[0];
+      const VariableGEPIndex &Var1 = DecompGEP1.VarIndices[1];
+      if (Var0.Scale == -Var1.Scale && Var0.Val.TruncBits == 0 &&
+          Var0.Val.hasSameCastsAs(Var1.Val) && VisitedPhiBBs.empty() &&
+          isKnownNonEqual(Var0.Val.V, Var1.Val.V, DL, &AC, /* CxtI */ nullptr,
+                          DT))
+        MinAbsVarIndex = Var0.Scale.abs();
+    }
+
+    if (MinAbsVarIndex) {
+      MinAbsVarIndex->dump();
+      // The constant offset will have added at least +/-MinAbsVarIndex to it.
+      APInt OffsetLo = DecompGEP1.Offset - *MinAbsVarIndex;
+      APInt OffsetHi = DecompGEP1.Offset + *MinAbsVarIndex;
+      // We know that Offset <= OffsetLo || Offset >= OffsetHi
+      if (OffsetLo.isNegative() && (-OffsetLo).uge(V1Size.getValue()) &&
+          OffsetHi.isNonNegative() && OffsetHi.uge(V2Size.getValue()))
+        return AliasResult::NoAlias;
+    }
+
+    if (constantOffsetHeuristic(DecompGEP1, V1Size, V2Size, &AC, DT))
       return AliasResult::NoAlias;
   }
-
-  if (constantOffsetHeuristic(DecompGEP1, V1Size, V2Size, &AC, DT))
-    return AliasResult::NoAlias;
 
   // Statically, we can see that the base objects are the same, but the
   // pointers have dynamic offsets which we can't resolve. And none of our
@@ -1610,7 +1617,7 @@ AliasResult BasicAAResult::aliasCheck(const Value *V1, LocationSize V1Size,
       (isObjectSmallerThan(
           O1, getMinimalExtentFrom(*V2, V2Size, DL, NullIsValidLocation), DL,
           TLI, NullIsValidLocation)))
-    return AliasResult::NoAlias;
+    if (!DisableOOBAnalysis) return AliasResult::NoAlias;
 
   // If one the accesses may be before the accessed pointer, canonicalize this
   // by using unknown after-pointer sizes for both accesses. This is
