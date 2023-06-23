@@ -780,9 +780,7 @@ void PromoteMem2Reg::run() {
     BasicBlock::iterator BBI = BB->begin();
     while ((SomePHI = dyn_cast<PHINode>(BBI++)) &&
            SomePHI->getNumIncomingValues() == NumBadPreds) {
-      Value *UndefVal = ZeroUninitLoads
-          ? Constant::getNullValue(SomePHI->getType())
-          : UndefValue::get(SomePHI->getType());
+      Value *UndefVal = UndefValue::get(SomePHI->getType());
       for (BasicBlock *Pred : Preds)
         SomePHI->addIncoming(UndefVal, Pred);
     }
