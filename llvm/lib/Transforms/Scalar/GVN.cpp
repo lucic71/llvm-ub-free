@@ -1237,7 +1237,7 @@ bool GVNPass::AnalyzeLoadAvailability(LoadInst *Load, MemDepResult DepInfo,
   }
 
   if (Constant *InitVal =
-          getInitialValueOfAllocation(DepInst, TLI, Load->getType())) {
+          getInitialValueOfAllocation(DepInst, TLI, Load->getType(), /*isUsedForLoad*/ true)) {
     Res = AvailableValue::get(InitVal);
     return true;
   }

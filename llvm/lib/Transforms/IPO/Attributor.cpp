@@ -221,8 +221,8 @@ bool AA::isDynamicallyUnique(Attributor &A, const AbstractAttribute &QueryingAA,
 Constant *AA::getInitialValueForObj(Value &Obj, Type &Ty,
                                     const TargetLibraryInfo *TLI) {
   if (isa<AllocaInst>(Obj))
-    return UndefValue::get(&Ty);
-  if (Constant *Init = getInitialValueOfAllocation(&Obj, TLI, &Ty))
+    return Constant::getNullValue(&Ty);
+  if (Constant *Init = getInitialValueOfAllocation(&Obj, TLI, &Ty, /*isUsedForLoad*/ true))
     return Init;
   auto *GV = dyn_cast<GlobalVariable>(&Obj);
   if (!GV)
@@ -230,7 +230,7 @@ Constant *AA::getInitialValueForObj(Value &Obj, Type &Ty,
   if (!GV->hasLocalLinkage() && !(GV->isConstant() && GV->hasInitializer()))
     return nullptr;
   if (!GV->hasInitializer())
-    return UndefValue::get(&Ty);
+    return Constant::getNullValue(&Ty);
   return dyn_cast_or_null<Constant>(getWithType(*GV->getInitializer(), Ty));
 }
 

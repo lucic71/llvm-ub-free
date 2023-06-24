@@ -457,14 +457,14 @@ llvm::getAllocSize(const CallBase *CB, const TargetLibraryInfo *TLI,
 
 Constant *llvm::getInitialValueOfAllocation(const Value *V,
                                             const TargetLibraryInfo *TLI,
-                                            Type *Ty) {
+                                            Type *Ty, bool isUsedForLoad) {
   auto *Alloc = dyn_cast<CallBase>(V);
   if (!Alloc)
     return nullptr;
 
   // malloc and aligned_alloc are uninitialized (undef)
   if (isMallocLikeFn(Alloc, TLI) || isAlignedAllocLikeFn(Alloc, TLI)) {
-    if (ZeroUninitLoads)
+    if (ZeroUninitLoads && isUsedForLoad)
       return Constant::getNullValue(Ty);
     else
       return UndefValue::get(Ty);
@@ -476,13 +476,13 @@ Constant *llvm::getInitialValueOfAllocation(const Value *V,
 
   AllocFnKind AK = getAllocFnKind(Alloc);
   if ((AK & AllocFnKind::Uninitialized) != AllocFnKind::Unknown) {
-    if (ZeroUninitLoads)
+    if (ZeroUninitLoads && isUsedForLoad)
       return Constant::getNullValue(Ty);
     else
       return UndefValue::get(Ty);
   }
   if ((AK & AllocFnKind::Zeroed) != AllocFnKind::Unknown)
-      return Constant::getNullValue(Ty);
+    return Constant::getNullValue(Ty);
 
   return nullptr;
 }
