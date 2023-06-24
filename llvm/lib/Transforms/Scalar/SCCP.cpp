@@ -74,6 +74,8 @@ STATISTIC(
     IPNumInstReplaced,
     "Number of instructions replaced with (simpler) instruction by IPSCCP");
 
+cl::opt<bool> TrapOnUB("trap-on-ub", cl::init(false));
+
 // Helper to check if \p LV is either a constant or a constant
 // range with a single element. This should cover exactly the same cases as the
 // old ValueLatticeElement::isConstant() and is intended to be used in the
@@ -402,7 +404,12 @@ static bool removeNonFeasibleEdges(const SCCPSolver &Solver, BasicBlock *BB,
         Updates.push_back({DominatorTree::Delete, BB, Succ});
     }
     TI->eraseFromParent();
-    new UnreachableInst(BB->getContext(), BB);
+    Instruction* unreachableInst = new UnreachableInst(BB->getContext(), BB);
+    if (TrapOnUB) {
+      Function *TrapFn =
+         Intrinsic::getDeclaration(unreachableInst->getParent()->getParent()->getParent(), Intrinsic::trap);
+      CallInst::Create(TrapFn, "", unreachableInst);
+    }
     DTU.applyUpdatesPermissive(Updates);
   } else if (FeasibleSuccessors.size() == 1) {
     // Replace with an unconditional branch to the only feasible successor.
@@ -436,7 +443,12 @@ static bool removeNonFeasibleEdges(const SCCPSolver &Solver, BasicBlock *BB,
         NewUnreachableBB =
             BasicBlock::Create(DefaultDest->getContext(), "default.unreachable",
                                DefaultDest->getParent(), DefaultDest);
-        new UnreachableInst(DefaultDest->getContext(), NewUnreachableBB);
+        Instruction* unreachableInst = new UnreachableInst(DefaultDest->getContext(), NewUnreachableBB);
+        if (TrapOnUB) {
+          Function *TrapFn =
+             Intrinsic::getDeclaration(unreachableInst->getParent()->getParent()->getParent(), Intrinsic::trap);
+          CallInst::Create(TrapFn, "", unreachableInst);
+        }
       }
 
       SI->setDefaultDest(NewUnreachableBB);
