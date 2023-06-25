@@ -1959,6 +1959,11 @@ defm drop_inbounds_from_gep : BoolFOption<"drop-inbounds-from-gep",
   NegFlag<SetFalse, [CC1Option], "Do not drop inbounds from GEPs (default)">,
   PosFlag<SetTrue,  [CC1Option], "Drop inbounds from GEPs">>;
 
+defm check_div_rem_overflow : BoolFOption<"check-div-rem-overflow",
+  CodeGenOpts<"CheckDivRemOverflow">, DefaultTrue,
+  NegFlag<SetFalse, [CC1Option], "Do not check div/rem ops for overflow (default)">,
+  PosFlag<SetTrue,  [CC1Option], "Check div/rem ops for overflow">>;
+
 defm constrain_shift_value : BoolFOption<"constrain-shift-value",
   CodeGenOpts<"NoConstrainShiftValue">, DefaultFalse,
   PosFlag<SetFalse, [], "Do not treat oversized shift as undefined behavior">,

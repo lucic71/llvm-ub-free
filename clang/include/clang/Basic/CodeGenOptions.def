@@ -491,6 +491,9 @@ CODEGENOPT(ConstrainBoolValue, 1, 0)
 /// Whether to drop inbounds for GEP
 CODEGENOPT(DropInboundsFromGEP, 1, 0)
 
+/// Whether to drop inbounds for GEP
+CODEGENOPT(CheckDivRemOverflow, 1, 0)
+
 /// Whether to align all memory to 1.
 CODEGENOPT(UseDefaultAlignment, 1, 1)
 

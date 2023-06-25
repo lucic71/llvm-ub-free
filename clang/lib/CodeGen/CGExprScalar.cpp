@@ -43,6 +43,7 @@
 #include "llvm/IR/Module.h"
 #include "llvm/Support/TypeSize.h"
 #include <cstdarg>
+#include <iostream>
 
 using namespace clang;
 using namespace CodeGen;
@@ -3283,8 +3284,25 @@ Value *ScalarExprEmitter::EmitDiv(const BinOpInfo &Ops) {
 
   if (Ops.LHS->getType()->isFPOrFPVectorTy()) {
     llvm::Value *Val;
-    CodeGenFunction::CGFPOptionsRAII FPOptsRAII(CGF, Ops.FPFeatures);
+    if (CGF.CGM.getCodeGenOpts().CheckDivRemOverflow) {
+      CodeGenFunction::CGFPOptionsRAII FPOptsRAII(CGF, Ops.FPFeatures);
+
+      llvm::Value *Zero = llvm::Constant::getNullValue(ConvertType(Ops.Ty));
+      llvm::Value *NonZero = Builder.CreateFCmpUNE(Ops.RHS, Zero);
+
+      llvm::BasicBlock *TrapBB = CGF.createBasicBlock("overflow.trap", CGF.CurFn);
+      llvm::BasicBlock *DivBB = CGF.createBasicBlock("nooverflow", CGF.CurFn, Builder.GetInsertBlock()->getNextNode());
+
+      Builder.CreateCondBr(NonZero, TrapBB, DivBB);
+
+      Builder.SetInsertPoint(TrapBB);
+      CGF.EmitTrapCall(llvm::Intrinsic::trap);
+      Builder.CreateUnreachable();
+
+      Builder.SetInsertPoint(DivBB);
+    }
     Val = Builder.CreateFDiv(Ops.LHS, Ops.RHS, "div");
+
     if ((CGF.getLangOpts().OpenCL &&
          !CGF.CGM.getCodeGenOpts().OpenCLCorrectlyRoundedDivSqrt) ||
         (CGF.getLangOpts().HIP && CGF.getLangOpts().CUDAIsDevice &&
@@ -3302,12 +3320,43 @@ Value *ScalarExprEmitter::EmitDiv(const BinOpInfo &Ops) {
     }
     return Val;
   }
-  else if (Ops.isFixedPointOp())
+  else if (Ops.isFixedPointOp()) {
     return EmitFixedPointBinOp(Ops);
-  else if (Ops.Ty->hasUnsignedIntegerRepresentation())
-    return Builder.CreateUDiv(Ops.LHS, Ops.RHS, "div");
-  else
-    return Builder.CreateSDiv(Ops.LHS, Ops.RHS, "div");
+  } else if (Ops.Ty->isIntegerType()) {
+    if (CGF.CGM.getCodeGenOpts().CheckDivRemOverflow) {
+      llvm::Value *Zero = llvm::Constant::getNullValue(ConvertType(Ops.Ty));
+      llvm::IntegerType *Ty = cast<llvm::IntegerType>(Zero->getType());
+      llvm::Value *IntMin = Builder.getInt(llvm::APInt::getSignedMinValue(Ty->getBitWidth()));
+      llvm::Value *NegOne = llvm::Constant::getAllOnesValue(Ty);
+      
+      llvm::Value *RHSNotZero = Builder.CreateICmpEQ(Ops.RHS, Zero);
+      llvm::Value *LHSIsIntMin = Builder.CreateICmpEQ(Ops.LHS, IntMin);
+      llvm::Value *RHSIsNegOne = Builder.CreateICmpEQ(Ops.RHS, NegOne);
+
+      llvm::Value *And = Builder.CreateAnd(LHSIsIntMin, RHSIsNegOne);
+      llvm::Value *Or = Builder.CreateOr(RHSNotZero, And);
+
+      llvm::BasicBlock *TrapBB = CGF.createBasicBlock("overflow.trap", CGF.CurFn);
+      llvm::BasicBlock *DivBB = CGF.createBasicBlock("nooverflow", CGF.CurFn, Builder.GetInsertBlock()->getNextNode());
+
+      Builder.CreateCondBr(Or, TrapBB, DivBB);
+
+      Builder.SetInsertPoint(TrapBB);
+      CGF.EmitTrapCall(llvm::Intrinsic::trap);
+      Builder.CreateUnreachable();
+
+      Builder.SetInsertPoint(DivBB);
+    }
+    llvm::Value *Div;
+    if (Ops.Ty->hasUnsignedIntegerRepresentation())
+      Div = Builder.CreateUDiv(Ops.LHS, Ops.RHS, "div");
+    else
+      Div = Builder.CreateSDiv(Ops.LHS, Ops.RHS, "div");
+    
+    return Div;
+  }
+
+  llvm_unreachable("Unknown operands for div");
 }
 
 Value *ScalarExprEmitter::EmitRem(const BinOpInfo &Ops) {
@@ -3321,10 +3370,38 @@ Value *ScalarExprEmitter::EmitRem(const BinOpInfo &Ops) {
     EmitUndefinedBehaviorIntegerDivAndRemCheck(Ops, Zero, false);
   }
 
+  if (CGF.CGM.getCodeGenOpts().CheckDivRemOverflow) {
+    llvm::Value *Zero = llvm::Constant::getNullValue(ConvertType(Ops.Ty));
+    llvm::IntegerType *Ty = cast<llvm::IntegerType>(Zero->getType());
+    llvm::Value *IntMin = Builder.getInt(llvm::APInt::getSignedMinValue(Ty->getBitWidth()));
+    llvm::Value *NegOne = llvm::Constant::getAllOnesValue(Ty);
+    
+    llvm::Value *RHSNotZero = Builder.CreateICmpEQ(Ops.RHS, Zero);
+    llvm::Value *LHSIsIntMin = Builder.CreateICmpEQ(Ops.LHS, IntMin);
+    llvm::Value *RHSIsNegOne = Builder.CreateICmpEQ(Ops.RHS, NegOne);
+
+    llvm::Value *And = Builder.CreateAnd(LHSIsIntMin, RHSIsNegOne);
+    llvm::Value *Or = Builder.CreateOr(RHSNotZero, And);
+
+    llvm::BasicBlock *TrapBB = CGF.createBasicBlock("overflow.trap", CGF.CurFn);
+    llvm::BasicBlock *DivBB = CGF.createBasicBlock("nooverflow", CGF.CurFn, Builder.GetInsertBlock()->getNextNode());
+
+    Builder.CreateCondBr(Or, TrapBB, DivBB);
+
+    Builder.SetInsertPoint(TrapBB);
+    CGF.EmitTrapCall(llvm::Intrinsic::trap);
+    Builder.CreateUnreachable();
+
+    Builder.SetInsertPoint(DivBB);
+  }
+
+  llvm::Value *Rem;
   if (Ops.Ty->hasUnsignedIntegerRepresentation())
-    return Builder.CreateURem(Ops.LHS, Ops.RHS, "rem");
+    Rem = Builder.CreateURem(Ops.LHS, Ops.RHS, "rem");
   else
-    return Builder.CreateSRem(Ops.LHS, Ops.RHS, "rem");
+    Rem = Builder.CreateSRem(Ops.LHS, Ops.RHS, "rem");
+  
+  return Rem;
 }
 
 Value *ScalarExprEmitter::EmitOverflowCheckedBinOp(const BinOpInfo &Ops) {
