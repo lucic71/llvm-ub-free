@@ -43,7 +43,6 @@
 #include "llvm/IR/Module.h"
 #include "llvm/Support/TypeSize.h"
 #include <cstdarg>
-#include <iostream>
 
 using namespace clang;
 using namespace CodeGen;
@@ -3284,23 +3283,7 @@ Value *ScalarExprEmitter::EmitDiv(const BinOpInfo &Ops) {
 
   if (Ops.LHS->getType()->isFPOrFPVectorTy()) {
     llvm::Value *Val;
-    if (CGF.CGM.getCodeGenOpts().CheckDivRemOverflow) {
-      CodeGenFunction::CGFPOptionsRAII FPOptsRAII(CGF, Ops.FPFeatures);
-
-      llvm::Value *Zero = llvm::Constant::getNullValue(ConvertType(Ops.Ty));
-      llvm::Value *NonZero = Builder.CreateFCmpUNE(Ops.RHS, Zero);
-
-      llvm::BasicBlock *TrapBB = CGF.createBasicBlock("overflow.trap", CGF.CurFn);
-      llvm::BasicBlock *DivBB = CGF.createBasicBlock("nooverflow", CGF.CurFn, Builder.GetInsertBlock()->getNextNode());
-
-      Builder.CreateCondBr(NonZero, TrapBB, DivBB);
-
-      Builder.SetInsertPoint(TrapBB);
-      CGF.EmitTrapCall(llvm::Intrinsic::trap);
-      Builder.CreateUnreachable();
-
-      Builder.SetInsertPoint(DivBB);
-    }
+    CodeGenFunction::CGFPOptionsRAII FPOptsRAII(CGF, Ops.FPFeatures);
     Val = Builder.CreateFDiv(Ops.LHS, Ops.RHS, "div");
 
     if ((CGF.getLangOpts().OpenCL &&
