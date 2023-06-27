@@ -147,7 +147,7 @@ RValue CodeGenFunction::EmitCXXPseudoDestructorExpr(
       break;
 
     case Qualifiers::OCL_Strong:
-      EmitARCRelease(Builder.CreateLoad(BaseValue,
+      EmitARCRelease(Builder.CreateLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, BaseValue,
                         DestroyedType.isVolatileQualified()),
                      ARCPreciseLifetime);
       break;
@@ -560,10 +560,17 @@ static void EmitNullBaseClassInitialization(CodeGenFunction &CGF,
       CharUnits StoreOffset = Store.first;
       CharUnits StoreSize = Store.second;
       llvm::Value *StoreSizeVal = CGF.CGM.getSize(StoreSize);
-      CGF.Builder.CreateMemCpy(
-          CGF.Builder.CreateConstInBoundsByteGEP(DestPtr, StoreOffset),
-          CGF.Builder.CreateConstInBoundsByteGEP(SrcPtr, StoreOffset),
-          StoreSizeVal);
+      Address Dest = CGF.CGM.getCodeGenOpts().DropInboundsFromGEP
+        ? CGF.Builder.CreateConstByteGEP(DestPtr, StoreOffset)
+        : CGF.Builder.CreateConstInBoundsByteGEP(DestPtr, StoreOffset);
+      Address Src = CGF.CGM.getCodeGenOpts().DropInboundsFromGEP
+        ? CGF.Builder.CreateConstByteGEP(SrcPtr, StoreOffset)
+        : CGF.Builder.CreateConstInBoundsByteGEP(SrcPtr, StoreOffset);
+      if (!CGF.CGM.getCodeGenOpts().UseDefaultAlignment) {
+        Dest = Dest.withAlignment(CharUnits::One()); 
+        Src = Src.withAlignment(CharUnits::One()); 
+      }
+      CGF.Builder.CreateMemCpy(Dest, Src, StoreSizeVal);
     }
 
   // Otherwise, just memset the whole thing to zero.  This is legal
@@ -575,7 +582,13 @@ static void EmitNullBaseClassInitialization(CodeGenFunction &CGF,
       CharUnits StoreSize = Store.second;
       llvm::Value *StoreSizeVal = CGF.CGM.getSize(StoreSize);
       CGF.Builder.CreateMemSet(
-          CGF.Builder.CreateConstInBoundsByteGEP(DestPtr, StoreOffset),
+          CGF.CGM.getCodeGenOpts().UseDefaultAlignment
+          ? (CGF.CGM.getCodeGenOpts().DropInboundsFromGEP
+            ? CGF.Builder.CreateConstByteGEP(DestPtr, StoreOffset)
+            : CGF.Builder.CreateConstInBoundsByteGEP(DestPtr, StoreOffset))
+          : ( CGF.CGM.getCodeGenOpts().DropInboundsFromGEP
+            ? CGF.Builder.CreateConstByteGEP(DestPtr, StoreOffset).withAlignment(CharUnits::One())
+            : CGF.Builder.CreateConstInBoundsByteGEP(DestPtr, StoreOffset).withAlignment(CharUnits::One())),
           CGF.Builder.getInt8(0), StoreSizeVal);
     }
   }
@@ -1027,7 +1040,7 @@ void CodeGenFunction::EmitNewArrayInitializer(
     }
 
     // Create the memset.
-    Builder.CreateMemSet(CurPtr, Builder.getInt8(0), RemainingSize, false);
+    Builder.CreateMemSet(CGM.getCodeGenOpts().UseDefaultAlignment ? CurPtr : CurPtr.withAlignment(CharUnits::One()), Builder.getInt8(0), RemainingSize, false);
     return true;
   };
 
@@ -1053,8 +1066,9 @@ void CodeGenFunction::EmitNewArrayInitializer(
       InitListElements =
           cast<ConstantArrayType>(ILE->getType()->getAsArrayTypeUnsafe())
               ->getSize().getZExtValue();
-      CurPtr = Builder.CreateConstInBoundsGEP(
-          CurPtr, InitListElements, "string.init.end");
+      CurPtr = CGM.getCodeGenOpts().DropInboundsFromGEP
+      ? Builder.CreateConstGEP( CurPtr, InitListElements, "string.init.end")
+      : Builder.CreateConstInBoundsGEP( CurPtr, InitListElements, "string.init.end");
 
       // Zero out the rest, if any remain.
       llvm::ConstantInt *ConstNum = dyn_cast<llvm::ConstantInt>(NumElements);
@@ -1086,7 +1100,7 @@ void CodeGenFunction::EmitNewArrayInitializer(
       // alloca.
       EndOfInit = CreateTempAlloca(BeginPtr.getType(), getPointerAlign(),
                                    "array.init.end");
-      CleanupDominator = Builder.CreateStore(BeginPtr.getPointer(), EndOfInit);
+      CleanupDominator = Builder.CreateStore(!CGM.getCodeGenOpts().UseDefaultAlignment, BeginPtr.getPointer(), EndOfInit);
       pushIrregularPartialArrayCleanup(BeginPtr.getPointer(), EndOfInit,
                                        ElementType, ElementAlign,
                                        getDestroyer(DtorKind));
@@ -1101,7 +1115,7 @@ void CodeGenFunction::EmitNewArrayInitializer(
       if (EndOfInit.isValid()) {
         auto FinishedPtr =
           Builder.CreateBitCast(CurPtr.getPointer(), BeginPtr.getType());
-        Builder.CreateStore(FinishedPtr, EndOfInit);
+        Builder.CreateStore(!CGM.getCodeGenOpts().UseDefaultAlignment, FinishedPtr, EndOfInit);
       }
       // FIXME: If the last initializer is an incomplete initializer list for
       // an array, and we have an array filler, we can fold together the two
@@ -1109,9 +1123,9 @@ void CodeGenFunction::EmitNewArrayInitializer(
       StoreAnyExprIntoOneUnit(*this, ILE->getInit(i),
                               ILE->getInit(i)->getType(), CurPtr,
                               AggValueSlot::DoesNotOverlap);
-      CurPtr = Address(Builder.CreateInBoundsGEP(
-                           CurPtr.getElementType(), CurPtr.getPointer(),
-                           Builder.getSize(1), "array.exp.next"),
+      CurPtr = Address(CGM.getCodeGenOpts().DropInboundsFromGEP
+                       ? Builder.CreateGEP( CurPtr.getElementType(), CurPtr.getPointer(), Builder.getSize(1), "array.exp.next")
+                       : Builder.CreateInBoundsGEP( CurPtr.getElementType(), CurPtr.getPointer(), Builder.getSize(1), "array.exp.next"),
                        CurPtr.getElementType(),
                        StartAlign.alignmentAtOffset((i + 1) * ElementSize));
     }
@@ -1165,7 +1179,7 @@ void CodeGenFunction::EmitNewArrayInitializer(
     // FIXME: Share this cleanup with the constructor call emission rather than
     // having it create a cleanup of its own.
     if (EndOfInit.isValid())
-      Builder.CreateStore(CurPtr.getPointer(), EndOfInit);
+      Builder.CreateStore(!CGM.getCodeGenOpts().UseDefaultAlignment, CurPtr.getPointer(), EndOfInit);
 
     // Emit a constructor call loop to initialize the remaining elements.
     if (InitListElements)
@@ -1228,9 +1242,9 @@ void CodeGenFunction::EmitNewArrayInitializer(
   llvm::BasicBlock *ContBB = createBasicBlock("new.loop.end");
 
   // Find the end of the array, hoisted out of the loop.
-  llvm::Value *EndPtr =
-    Builder.CreateInBoundsGEP(BeginPtr.getElementType(), BeginPtr.getPointer(),
-                              NumElements, "array.end");
+  llvm::Value *EndPtr = CGM.getCodeGenOpts().DropInboundsFromGEP 
+    ? Builder.CreateGEP(BeginPtr.getElementType(), BeginPtr.getPointer(), NumElements, "array.end")
+    : Builder.CreateInBoundsGEP(BeginPtr.getElementType(), BeginPtr.getPointer(), NumElements, "array.end");
 
   // If the number of elements isn't constant, we have to now check if there is
   // anything left to initialize.
@@ -1252,7 +1266,7 @@ void CodeGenFunction::EmitNewArrayInitializer(
 
   // Store the new Cleanup position for irregular Cleanups.
   if (EndOfInit.isValid())
-    Builder.CreateStore(CurPtr.getPointer(), EndOfInit);
+    Builder.CreateStore(!CGM.getCodeGenOpts().UseDefaultAlignment, CurPtr.getPointer(), EndOfInit);
 
   // Enter a partial-destruction Cleanup if necessary.
   if (!CleanupDominator && needsEHCleanup(DtorKind)) {
@@ -1274,9 +1288,9 @@ void CodeGenFunction::EmitNewArrayInitializer(
   }
 
   // Advance to the next element by adjusting the pointer type as necessary.
-  llvm::Value *NextPtr =
-    Builder.CreateConstInBoundsGEP1_32(ElementTy, CurPtr.getPointer(), 1,
-                                       "array.next");
+  llvm::Value *NextPtr = CGM.getCodeGenOpts().DropInboundsFromGEP
+    ? Builder.CreateConstGEP1_32(ElementTy, CurPtr.getPointer(), 1, "array.next")
+    : Builder.CreateConstInBoundsGEP1_32(ElementTy, CurPtr.getPointer(), 1, "array.next");
 
   // Check whether we've gotten to the end of the array and, if so,
   // exit the loop.
@@ -2037,8 +2051,9 @@ static void EmitArrayDelete(CodeGenFunction &CGF,
       deletedPtr.getAlignment().alignmentOfArrayElement(elementSize);
 
     llvm::Value *arrayBegin = deletedPtr.getPointer();
-    llvm::Value *arrayEnd = CGF.Builder.CreateInBoundsGEP(
-      deletedPtr.getElementType(), arrayBegin, numElements, "delete.end");
+    llvm::Value *arrayEnd = CGF.CGM.getCodeGenOpts().DropInboundsFromGEP 
+      ? CGF.Builder.CreateGEP(deletedPtr.getElementType(), arrayBegin, numElements, "delete.end")
+      : CGF.Builder.CreateInBoundsGEP(deletedPtr.getElementType(), arrayBegin, numElements, "delete.end");
 
     // Note that it is legal to allocate a zero-length array, and we
     // can never fold the check away because the length should always
@@ -2101,8 +2116,9 @@ void CodeGenFunction::EmitCXXDeleteExpr(const CXXDeleteExpr *E) {
       GEP.push_back(Zero);
     }
 
-    Ptr = Address(Builder.CreateInBoundsGEP(Ptr.getElementType(),
-                                            Ptr.getPointer(), GEP, "del.first"),
+    Ptr = Address(CGM.getCodeGenOpts().DropInboundsFromGEP
+                  ? Builder.CreateGEP(Ptr.getElementType(), Ptr.getPointer(), GEP, "del.first")
+                  : Builder.CreateInBoundsGEP(Ptr.getElementType(), Ptr.getPointer(), GEP, "del.first"),
                   ConvertTypeForMem(DeleteTy), Ptr.getAlignment());
   }
 

@@ -676,7 +676,7 @@ RValue CodeGenFunction::EmitObjCMessageExpr(const ObjCMessageExpr *E,
     // Do an unsafe store of null into self.
     Address selfAddr =
       GetAddrOfLocalVar(cast<ObjCMethodDecl>(CurCodeDecl)->getSelfDecl());
-    Builder.CreateStore(getNullForVariable(selfAddr), selfAddr);
+    Builder.CreateStore(!CGM.getCodeGenOpts().UseDefaultAlignment, getNullForVariable(selfAddr), selfAddr);
   }
 
   RValue result;
@@ -711,7 +711,7 @@ RValue CodeGenFunction::EmitObjCMessageExpr(const ObjCMessageExpr *E,
     llvm::Type *selfTy = selfAddr.getElementType();
     newSelf = Builder.CreateBitCast(newSelf, selfTy);
 
-    Builder.CreateStore(newSelf, selfAddr);
+    Builder.CreateStore(!CGM.getCodeGenOpts().UseDefaultAlignment, newSelf, selfAddr);
   }
 
   return AdjustObjCObjectType(*this, E->getType(), result);
@@ -1155,7 +1155,7 @@ CodeGenFunction::generateObjCGetterBody(const ObjCImplementationDecl *classImpl,
     // Perform an atomic load.  This does not impose ordering constraints.
     Address ivarAddr = LV.getAddress(*this);
     ivarAddr = Builder.CreateElementBitCast(ivarAddr, bitcastType);
-    llvm::LoadInst *load = Builder.CreateLoad(ivarAddr, "load");
+    llvm::LoadInst *load = Builder.CreateLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, ivarAddr, "load");
     load->setAtomic(llvm::AtomicOrdering::Unordered);
 
     // Store that value into the return address.  Doing this with a
@@ -1168,7 +1168,7 @@ CodeGenFunction::generateObjCGetterBody(const ObjCImplementationDecl *classImpl,
       bitcastType = llvm::Type::getIntNTy(getLLVMContext(), retTySize);
       ivarVal = Builder.CreateTrunc(load, bitcastType);
     }
-    Builder.CreateStore(ivarVal,
+    Builder.CreateStore(!CGM.getCodeGenOpts().UseDefaultAlignment, ivarVal,
                         Builder.CreateElementBitCast(ReturnValue, bitcastType));
 
     // Make sure we don't do an autorelease.
@@ -1189,7 +1189,7 @@ CodeGenFunction::generateObjCGetterBody(const ObjCImplementationDecl *classImpl,
     // FIXME: Can't this be simpler? This might even be worse than the
     // corresponding gcc code.
     llvm::Value *cmd =
-      Builder.CreateLoad(GetAddrOfLocalVar(getterMethod->getCmdDecl()), "cmd");
+      Builder.CreateLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, GetAddrOfLocalVar(getterMethod->getCmdDecl()), "cmd");
     llvm::Value *self = Builder.CreateBitCast(LoadObjCSelf(), VoidPtrTy);
     llvm::Value *ivarOffset =
       EmitIvarOffset(classImpl->getClassInterface(), ivar);
@@ -1441,10 +1441,10 @@ CodeGenFunction::generateObjCSetterBody(const ObjCImplementationDecl *classImpl,
     ivarAddr = Builder.CreateElementBitCast(ivarAddr, bitcastType);
 
     // This bitcast load is likely to cause some nasty IR.
-    llvm::Value *load = Builder.CreateLoad(argAddr);
+    llvm::Value *load = Builder.CreateLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, argAddr);
 
     // Perform an atomic store.  There are no memory ordering requirements.
-    llvm::StoreInst *store = Builder.CreateStore(load, ivarAddr);
+    llvm::StoreInst *store = Builder.CreateStore(!CGM.getCodeGenOpts().UseDefaultAlignment, load, ivarAddr);
     store->setAtomic(llvm::AtomicOrdering::Unordered);
     return;
   }
@@ -1475,13 +1475,13 @@ CodeGenFunction::generateObjCSetterBody(const ObjCImplementationDecl *classImpl,
     // Emit objc_setProperty((id) self, _cmd, offset, arg,
     //                       <is-atomic>, <is-copy>).
     llvm::Value *cmd =
-      Builder.CreateLoad(GetAddrOfLocalVar(setterMethod->getCmdDecl()));
+      Builder.CreateLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, GetAddrOfLocalVar(setterMethod->getCmdDecl()));
     llvm::Value *self =
       Builder.CreateBitCast(LoadObjCSelf(), VoidPtrTy);
     llvm::Value *ivarOffset =
       EmitIvarOffset(classImpl->getClassInterface(), ivar);
     Address argAddr = GetAddrOfLocalVar(*setterMethod->param_begin());
-    llvm::Value *arg = Builder.CreateLoad(argAddr, "arg");
+    llvm::Value *arg = Builder.CreateLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, argAddr, "arg");
     arg = Builder.CreateBitCast(arg, VoidPtrTy);
 
     CallArgList args;
@@ -1824,11 +1824,11 @@ void CodeGenFunction::EmitObjCForCollectionStmt(const ObjCForCollectionStmt &S){
   Address StateMutationsPtrPtr =
       Builder.CreateStructGEP(StatePtr, 2, "mutationsptr.ptr");
   llvm::Value *StateMutationsPtr
-    = Builder.CreateLoad(StateMutationsPtrPtr, "mutationsptr");
+    = Builder.CreateLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, StateMutationsPtrPtr, "mutationsptr");
 
   llvm::Type *UnsignedLongTy = ConvertType(getContext().UnsignedLongTy);
   llvm::Value *initialMutations =
-    Builder.CreateAlignedLoad(UnsignedLongTy, StateMutationsPtr,
+    Builder.CreateAlignedLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, UnsignedLongTy, StateMutationsPtr,
                               getPointerAlign(), "forcoll.initial-mutations");
 
   // Start looping.  This is the point we return to whenever we have a
@@ -1849,9 +1849,9 @@ void CodeGenFunction::EmitObjCForCollectionStmt(const ObjCForCollectionStmt &S){
   // Check whether the mutations value has changed from where it was
   // at start.  StateMutationsPtr should actually be invariant between
   // refreshes.
-  StateMutationsPtr = Builder.CreateLoad(StateMutationsPtrPtr, "mutationsptr");
+  StateMutationsPtr = Builder.CreateLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, StateMutationsPtrPtr, "mutationsptr");
   llvm::Value *currentMutations
-    = Builder.CreateAlignedLoad(UnsignedLongTy, StateMutationsPtr,
+    = Builder.CreateAlignedLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, UnsignedLongTy, StateMutationsPtr,
                                 getPointerAlign(), "statemutations");
 
   llvm::BasicBlock *WasMutatedBB = createBasicBlock("forcoll.mutated");
@@ -1907,13 +1907,13 @@ void CodeGenFunction::EmitObjCForCollectionStmt(const ObjCForCollectionStmt &S){
   Address StateItemsPtr =
       Builder.CreateStructGEP(StatePtr, 1, "stateitems.ptr");
   llvm::Value *EnumStateItems =
-    Builder.CreateLoad(StateItemsPtr, "stateitems");
+    Builder.CreateLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, StateItemsPtr, "stateitems");
 
   // Fetch the value at the current index from the buffer.
   llvm::Value *CurrentItemPtr = Builder.CreateGEP(
       ObjCIdType, EnumStateItems, index, "currentitem.ptr");
   llvm::Value *CurrentItem =
-    Builder.CreateAlignedLoad(ObjCIdType, CurrentItemPtr, getPointerAlign());
+    Builder.CreateAlignedLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, ObjCIdType, CurrentItemPtr, getPointerAlign());
 
   if (SanOpts.has(SanitizerKind::ObjCCast)) {
     // Before using an item from the collection, check that the implicit cast
@@ -2439,7 +2439,7 @@ void CodeGenFunction::EmitARCDestroyStrong(Address addr,
     return;
   }
 
-  llvm::Value *value = Builder.CreateLoad(addr);
+  llvm::Value *value = Builder.CreateLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, addr);
   EmitARCRelease(value, precise);
 }
 
@@ -2592,7 +2592,7 @@ void CodeGenFunction::EmitARCInitWeak(Address addr, llvm::Value *value) {
   // much more complicated.
   if (isa<llvm::ConstantPointerNull>(value) &&
       CGM.getCodeGenOpts().OptimizationLevel == 0) {
-    Builder.CreateStore(value, addr);
+    Builder.CreateStore(!CGM.getCodeGenOpts().UseDefaultAlignment, value, addr);
     return;
   }
 
@@ -2767,7 +2767,7 @@ void CodeGenFunction::destroyARCWeak(CodeGenFunction &CGF,
 
 void CodeGenFunction::emitARCIntrinsicUse(CodeGenFunction &CGF, Address addr,
                                           QualType type) {
-  llvm::Value *value = CGF.Builder.CreateLoad(addr);
+  llvm::Value *value = CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, addr);
   CGF.EmitARCIntrinsicUse(value);
 }
 

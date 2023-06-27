@@ -5859,7 +5859,7 @@ struct AAHeapToStackFunction final : public AAHeapToStack {
       // alloca to the same pattern as the original allocation result.
       if (isRemovableAlloc(CB, TLI)) {
         auto *I8Ty = Type::getInt8Ty(CB->getParent()->getContext());
-        if (nullptr != getInitialValueOfAllocation(CB, TLI, I8Ty)) {
+        if (nullptr != getInitialValueOfAllocation(CB, TLI, I8Ty, /*isUsedForLoad*/ false)) {
           AllocationInfo *AI = new (A.Allocator) AllocationInfo{CB};
           AllocationInfos[CB] = AI;
           if (TLI)
@@ -6008,7 +6008,7 @@ struct AAHeapToStackFunction final : public AAHeapToStack {
             Alloca, AI.CB->getType(), "malloc_cast", AI.CB);
 
       auto *I8Ty = Type::getInt8Ty(F->getContext());
-      auto *InitVal = getInitialValueOfAllocation(AI.CB, TLI, I8Ty);
+      auto *InitVal = getInitialValueOfAllocation(AI.CB, TLI, I8Ty, /*isUsedForLoad*/ true);
       assert(InitVal &&
              "Must be able to materialize initial memory state of allocation");
 

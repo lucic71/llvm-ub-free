@@ -325,7 +325,7 @@ void CGNVCUDARuntime::emitDeviceStubBodyNew(CodeGenFunction &CGF,
   for (unsigned i = 0; i < Args.size(); ++i) {
     llvm::Value* VarPtr = CGF.GetAddrOfLocalVar(Args[i]).getPointer();
     llvm::Value *VoidVarPtr = CGF.Builder.CreatePointerCast(VarPtr, VoidPtrTy);
-    CGF.Builder.CreateDefaultAlignedStore(
+    CGF.Builder.CreateDefaultAlignedStore(!CGM.getCodeGenOpts().UseDefaultAlignment, 
         VoidVarPtr,
         CGF.Builder.CreateConstGEP1_32(VoidPtrTy, KernelArgs.getPointer(), i));
   }
@@ -396,9 +396,9 @@ void CGNVCUDARuntime::emitDeviceStubBodyNew(CodeGenFunction &CGF,
   LaunchKernelArgs.add(RValue::getAggregate(BlockDim), Dim3Ty);
   LaunchKernelArgs.add(RValue::get(KernelArgs.getPointer()),
                        cudaLaunchKernelFD->getParamDecl(3)->getType());
-  LaunchKernelArgs.add(RValue::get(CGF.Builder.CreateLoad(ShmemSize)),
+  LaunchKernelArgs.add(RValue::get(CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, ShmemSize)),
                        cudaLaunchKernelFD->getParamDecl(4)->getType());
-  LaunchKernelArgs.add(RValue::get(CGF.Builder.CreateLoad(Stream)),
+  LaunchKernelArgs.add(RValue::get(CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, Stream)),
                        cudaLaunchKernelFD->getParamDecl(5)->getType());
 
   QualType QT = cudaLaunchKernelFD->getType();
@@ -833,7 +833,7 @@ llvm::Function *CGNVCUDARuntime::makeModuleCtorFunction() {
         GpuBinaryHandle, VoidPtrPtrTy,
         CharUnits::fromQuantity(GpuBinaryHandle->getAlignment()));
     {
-      auto *HandleValue = CtorBuilder.CreateLoad(GpuBinaryAddr);
+      auto *HandleValue = CtorBuilder.CreateLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, GpuBinaryAddr);
       llvm::Constant *Zero =
           llvm::Constant::getNullValue(HandleValue->getType());
       llvm::Value *EQZero = CtorBuilder.CreateICmpEQ(HandleValue, Zero);
@@ -845,14 +845,14 @@ llvm::Function *CGNVCUDARuntime::makeModuleCtorFunction() {
       llvm::CallInst *RegisterFatbinCall = CtorBuilder.CreateCall(
           RegisterFatbinFunc,
           CtorBuilder.CreateBitCast(FatbinWrapper, VoidPtrTy));
-      CtorBuilder.CreateStore(RegisterFatbinCall, GpuBinaryAddr);
+      CtorBuilder.CreateStore(!CGM.getCodeGenOpts().UseDefaultAlignment, RegisterFatbinCall, GpuBinaryAddr);
       CtorBuilder.CreateBr(ExitBlock);
     }
     {
       CtorBuilder.SetInsertPoint(ExitBlock);
       // Call __hip_register_globals(GpuBinaryHandle);
       if (RegisterGlobalsFunc) {
-        auto *HandleValue = CtorBuilder.CreateLoad(GpuBinaryAddr);
+        auto *HandleValue = CtorBuilder.CreateLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, GpuBinaryAddr);
         CtorBuilder.CreateCall(RegisterGlobalsFunc, HandleValue);
       }
     }
@@ -867,7 +867,7 @@ llvm::Function *CGNVCUDARuntime::makeModuleCtorFunction() {
         TheModule, VoidPtrPtrTy, false, llvm::GlobalValue::InternalLinkage,
         llvm::ConstantPointerNull::get(VoidPtrPtrTy), "__cuda_gpubin_handle");
     GpuBinaryHandle->setAlignment(CGM.getPointerAlign().getAsAlign());
-    CtorBuilder.CreateAlignedStore(RegisterFatbinCall, GpuBinaryHandle,
+    CtorBuilder.CreateAlignedStore(!CGM.getCodeGenOpts().UseDefaultAlignment, RegisterFatbinCall, GpuBinaryHandle,
                                    CGM.getPointerAlign());
 
     // Call __cuda_register_globals(GpuBinaryHandle);
@@ -969,7 +969,7 @@ llvm::Function *CGNVCUDARuntime::makeModuleDtorFunction() {
   Address GpuBinaryAddr(
       GpuBinaryHandle, GpuBinaryHandle->getValueType(),
       CharUnits::fromQuantity(GpuBinaryHandle->getAlignment()));
-  auto *HandleValue = DtorBuilder.CreateLoad(GpuBinaryAddr);
+  auto *HandleValue = DtorBuilder.CreateLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, GpuBinaryAddr);
   // There is only one HIP fat binary per linked module, however there are
   // multiple destructor functions. Make sure the fat binary is unregistered
   // only once.
@@ -984,7 +984,7 @@ llvm::Function *CGNVCUDARuntime::makeModuleDtorFunction() {
 
     DtorBuilder.SetInsertPoint(IfBlock);
     DtorBuilder.CreateCall(UnregisterFatbinFunc, HandleValue);
-    DtorBuilder.CreateStore(Zero, GpuBinaryAddr);
+    DtorBuilder.CreateStore(!CGM.getCodeGenOpts().UseDefaultAlignment, Zero, GpuBinaryAddr);
     DtorBuilder.CreateBr(ExitBlock);
 
     DtorBuilder.SetInsertPoint(ExitBlock);

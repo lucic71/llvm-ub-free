@@ -422,7 +422,7 @@ public:
 
     if (Value *Result = ConstantEmitter(CGF).tryEmitConstantExpr(E)) {
       if (E->isGLValue())
-        return CGF.Builder.CreateLoad(Address(
+        return CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, Address(
             Result, CGF.ConvertTypeForMem(E->getType()),
             CGF.getContext().getTypeAlignInChars(E->getType())));
       return Result;
@@ -2525,7 +2525,7 @@ ScalarExprEmitter::EmitScalarPrePostIncDec(const UnaryOperator *E, LValue LV,
     if (isInc && type->isBooleanType()) {
       llvm::Value *True = CGF.EmitToMemory(Builder.getTrue(), type);
       if (isPre) {
-        Builder.CreateStore(True, LV.getAddress(CGF), LV.isVolatileQualified())
+        Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, True, LV.getAddress(CGF), LV.isVolatileQualified())
             ->setAtomic(llvm::AtomicOrdering::SequentiallyConsistent);
         return Builder.getTrue();
       }
@@ -2647,7 +2647,7 @@ ScalarExprEmitter::EmitScalarPrePostIncDec(const UnaryOperator *E, LValue LV,
       llvm::Value *numElts = CGF.getVLASize(vla).NumElts;
       if (!isInc) numElts = Builder.CreateNSWNeg(numElts, "vla.negsize");
       llvm::Type *elemTy = CGF.ConvertTypeForMem(vla->getElementType());
-      if (CGF.getLangOpts().isSignedOverflowDefined())
+      if (CGF.getLangOpts().isSignedOverflowDefined() || CGF.CGM.getCodeGenOpts().DropInboundsFromGEP)
         value = Builder.CreateGEP(elemTy, value, numElts, "vla.inc");
       else
         value = CGF.EmitCheckedInBoundsGEP(
@@ -2659,7 +2659,7 @@ ScalarExprEmitter::EmitScalarPrePostIncDec(const UnaryOperator *E, LValue LV,
       llvm::Value *amt = Builder.getInt32(amount);
 
       value = CGF.EmitCastToVoidPtr(value);
-      if (CGF.getLangOpts().isSignedOverflowDefined())
+      if (CGF.getLangOpts().isSignedOverflowDefined() || CGF.CGM.getCodeGenOpts().DropInboundsFromGEP)
         value = Builder.CreateGEP(CGF.Int8Ty, value, amt, "incdec.funcptr");
       else
         value = CGF.EmitCheckedInBoundsGEP(CGF.Int8Ty, value, amt,
@@ -2672,7 +2672,7 @@ ScalarExprEmitter::EmitScalarPrePostIncDec(const UnaryOperator *E, LValue LV,
     } else {
       llvm::Value *amt = Builder.getInt32(amount);
       llvm::Type *elemTy = CGF.ConvertTypeForMem(type);
-      if (CGF.getLangOpts().isSignedOverflowDefined())
+      if (CGF.getLangOpts().isSignedOverflowDefined() || CGF.CGM.getCodeGenOpts().DropInboundsFromGEP)
         value = Builder.CreateGEP(elemTy, value, amt, "incdec.ptr");
       else
         value = CGF.EmitCheckedInBoundsGEP(
@@ -2784,7 +2784,7 @@ ScalarExprEmitter::EmitScalarPrePostIncDec(const UnaryOperator *E, LValue LV,
     llvm::Value *sizeValue =
       llvm::ConstantInt::get(CGF.SizeTy, size.getQuantity());
 
-    if (CGF.getLangOpts().isSignedOverflowDefined())
+    if (CGF.getLangOpts().isSignedOverflowDefined() || CGF.CGM.getCodeGenOpts().DropInboundsFromGEP)
       value = Builder.CreateGEP(CGF.Int8Ty, value, sizeValue, "incdec.objptr");
     else
       value = CGF.EmitCheckedInBoundsGEP(
@@ -3285,6 +3285,7 @@ Value *ScalarExprEmitter::EmitDiv(const BinOpInfo &Ops) {
     llvm::Value *Val;
     CodeGenFunction::CGFPOptionsRAII FPOptsRAII(CGF, Ops.FPFeatures);
     Val = Builder.CreateFDiv(Ops.LHS, Ops.RHS, "div");
+
     if ((CGF.getLangOpts().OpenCL &&
          !CGF.CGM.getCodeGenOpts().OpenCLCorrectlyRoundedDivSqrt) ||
         (CGF.getLangOpts().HIP && CGF.getLangOpts().CUDAIsDevice &&
@@ -3302,12 +3303,43 @@ Value *ScalarExprEmitter::EmitDiv(const BinOpInfo &Ops) {
     }
     return Val;
   }
-  else if (Ops.isFixedPointOp())
+  else if (Ops.isFixedPointOp()) {
     return EmitFixedPointBinOp(Ops);
-  else if (Ops.Ty->hasUnsignedIntegerRepresentation())
-    return Builder.CreateUDiv(Ops.LHS, Ops.RHS, "div");
-  else
-    return Builder.CreateSDiv(Ops.LHS, Ops.RHS, "div");
+  } else if (Ops.Ty->isIntegerType()) {
+    if (CGF.CGM.getCodeGenOpts().CheckDivRemOverflow) {
+      llvm::Value *Zero = llvm::Constant::getNullValue(ConvertType(Ops.Ty));
+      llvm::IntegerType *Ty = cast<llvm::IntegerType>(Zero->getType());
+      llvm::Value *IntMin = Builder.getInt(llvm::APInt::getSignedMinValue(Ty->getBitWidth()));
+      llvm::Value *NegOne = llvm::Constant::getAllOnesValue(Ty);
+      
+      llvm::Value *RHSNotZero = Builder.CreateICmpEQ(Ops.RHS, Zero);
+      llvm::Value *LHSIsIntMin = Builder.CreateICmpEQ(Ops.LHS, IntMin);
+      llvm::Value *RHSIsNegOne = Builder.CreateICmpEQ(Ops.RHS, NegOne);
+
+      llvm::Value *And = Builder.CreateAnd(LHSIsIntMin, RHSIsNegOne);
+      llvm::Value *Or = Builder.CreateOr(RHSNotZero, And);
+
+      llvm::BasicBlock *TrapBB = CGF.createBasicBlock("overflow.trap", CGF.CurFn);
+      llvm::BasicBlock *DivBB = CGF.createBasicBlock("nooverflow", CGF.CurFn, Builder.GetInsertBlock()->getNextNode());
+
+      Builder.CreateCondBr(Or, TrapBB, DivBB);
+
+      Builder.SetInsertPoint(TrapBB);
+      CGF.EmitTrapCall(llvm::Intrinsic::trap);
+      Builder.CreateUnreachable();
+
+      Builder.SetInsertPoint(DivBB);
+    }
+    llvm::Value *Div;
+    if (Ops.Ty->hasUnsignedIntegerRepresentation())
+      Div = Builder.CreateUDiv(Ops.LHS, Ops.RHS, "div");
+    else
+      Div = Builder.CreateSDiv(Ops.LHS, Ops.RHS, "div");
+    
+    return Div;
+  }
+
+  llvm_unreachable("Unknown operands for div");
 }
 
 Value *ScalarExprEmitter::EmitRem(const BinOpInfo &Ops) {
@@ -3321,10 +3353,38 @@ Value *ScalarExprEmitter::EmitRem(const BinOpInfo &Ops) {
     EmitUndefinedBehaviorIntegerDivAndRemCheck(Ops, Zero, false);
   }
 
+  if (CGF.CGM.getCodeGenOpts().CheckDivRemOverflow) {
+    llvm::Value *Zero = llvm::Constant::getNullValue(ConvertType(Ops.Ty));
+    llvm::IntegerType *Ty = cast<llvm::IntegerType>(Zero->getType());
+    llvm::Value *IntMin = Builder.getInt(llvm::APInt::getSignedMinValue(Ty->getBitWidth()));
+    llvm::Value *NegOne = llvm::Constant::getAllOnesValue(Ty);
+    
+    llvm::Value *RHSNotZero = Builder.CreateICmpEQ(Ops.RHS, Zero);
+    llvm::Value *LHSIsIntMin = Builder.CreateICmpEQ(Ops.LHS, IntMin);
+    llvm::Value *RHSIsNegOne = Builder.CreateICmpEQ(Ops.RHS, NegOne);
+
+    llvm::Value *And = Builder.CreateAnd(LHSIsIntMin, RHSIsNegOne);
+    llvm::Value *Or = Builder.CreateOr(RHSNotZero, And);
+
+    llvm::BasicBlock *TrapBB = CGF.createBasicBlock("overflow.trap", CGF.CurFn);
+    llvm::BasicBlock *DivBB = CGF.createBasicBlock("nooverflow", CGF.CurFn, Builder.GetInsertBlock()->getNextNode());
+
+    Builder.CreateCondBr(Or, TrapBB, DivBB);
+
+    Builder.SetInsertPoint(TrapBB);
+    CGF.EmitTrapCall(llvm::Intrinsic::trap);
+    Builder.CreateUnreachable();
+
+    Builder.SetInsertPoint(DivBB);
+  }
+
+  llvm::Value *Rem;
   if (Ops.Ty->hasUnsignedIntegerRepresentation())
-    return Builder.CreateURem(Ops.LHS, Ops.RHS, "rem");
+    Rem = Builder.CreateURem(Ops.LHS, Ops.RHS, "rem");
   else
-    return Builder.CreateSRem(Ops.LHS, Ops.RHS, "rem");
+    Rem = Builder.CreateSRem(Ops.LHS, Ops.RHS, "rem");
+  
+  return Rem;
 }
 
 Value *ScalarExprEmitter::EmitOverflowCheckedBinOp(const BinOpInfo &Ops) {
@@ -3525,7 +3585,7 @@ static Value *emitPointerArithmetic(CodeGenFunction &CGF,
     // signed-overflow, so we use the same semantics for our explicit
     // multiply.  We suppress this if overflow is not undefined behavior.
     llvm::Type *elemTy = CGF.ConvertTypeForMem(vla->getElementType());
-    if (CGF.getLangOpts().isSignedOverflowDefined()) {
+    if (CGF.getLangOpts().isSignedOverflowDefined() || CGF.CGM.getCodeGenOpts().DropInboundsFromGEP) {
       index = CGF.Builder.CreateMul(index, numElements, "vla.index");
       pointer = CGF.Builder.CreateGEP(elemTy, pointer, index, "add.ptr");
     } else {
@@ -3547,7 +3607,7 @@ static Value *emitPointerArithmetic(CodeGenFunction &CGF,
   }
 
   llvm::Type *elemTy = CGF.ConvertTypeForMem(elementType);
-  if (CGF.getLangOpts().isSignedOverflowDefined())
+  if (CGF.getLangOpts().isSignedOverflowDefined() || CGF.CGM.getCodeGenOpts().DropInboundsFromGEP)
     return CGF.Builder.CreateGEP(elemTy, pointer, index, "add.ptr");
 
   return CGF.EmitCheckedInBoundsGEP(
@@ -4738,7 +4798,7 @@ Value *ScalarExprEmitter::VisitVAArgExpr(VAArgExpr *VE) {
   }
 
   // FIXME Volatility.
-  llvm::Value *Val = Builder.CreateLoad(ArgPtr);
+  llvm::Value *Val = Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, ArgPtr);
 
   // If EmitVAArg promoted the type, we must truncate it.
   if (ArgTy != Val->getType()) {
@@ -5085,7 +5145,9 @@ CodeGenFunction::EmitCheckedInBoundsGEP(llvm::Type *ElemTy, Value *Ptr,
                                         bool SignedIndices, bool IsSubtraction,
                                         SourceLocation Loc, const Twine &Name) {
   llvm::Type *PtrTy = Ptr->getType();
-  Value *GEPVal = Builder.CreateInBoundsGEP(ElemTy, Ptr, IdxList, Name);
+  Value *GEPVal = CGM.getCodeGenOpts().DropInboundsFromGEP
+    ? Builder.CreateGEP(ElemTy, Ptr, IdxList, Name)
+    : Builder.CreateInBoundsGEP(ElemTy, Ptr, IdxList, Name);
 
   // If the pointer overflow sanitizer isn't enabled, do nothing.
   if (!SanOpts.has(SanitizerKind::PointerOverflow))

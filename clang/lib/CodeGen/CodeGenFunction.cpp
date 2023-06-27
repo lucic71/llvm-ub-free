@@ -569,7 +569,7 @@ CodeGenFunction::DecodeAddrUsedInPrologue(llvm::Value *F,
   auto *GOTAddr = Builder.CreateIntToPtr(GOTAsInt, Int8PtrPtrTy, "global_addr");
 
   // Load the original pointer through the global.
-  return Builder.CreateLoad(Address(GOTAddr, Int8PtrTy, getPointerAlign()),
+  return Builder.CreateLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, Address(GOTAddr, Int8PtrTy, getPointerAlign()),
                             "decoded_addr");
 }
 
@@ -1004,7 +1004,7 @@ void CodeGenFunction::StartFunction(GlobalDecl GD, QualType RetTy,
   // precise source location of the checked return statement.
   if (requiresReturnValueCheck()) {
     ReturnLocation = CreateDefaultAlignTempAlloca(Int8PtrTy, "return.sloc.ptr");
-    Builder.CreateStore(llvm::ConstantPointerNull::get(Int8PtrTy),
+    Builder.CreateStore(!CGM.getCodeGenOpts().UseDefaultAlignment, llvm::ConstantPointerNull::get(Int8PtrTy),
                         ReturnLocation);
   }
 
@@ -1090,7 +1090,7 @@ void CodeGenFunction::StartFunction(GlobalDecl GD, QualType RetTy,
     if (!CurFnInfo->getReturnInfo().getIndirectByVal()) {
       ReturnValuePointer =
           CreateDefaultAlignTempAlloca(Int8PtrTy, "result.ptr");
-      Builder.CreateStore(Builder.CreatePointerBitCastOrAddrSpaceCast(
+      Builder.CreateStore(!CGM.getCodeGenOpts().UseDefaultAlignment, Builder.CreatePointerBitCastOrAddrSpaceCast(
                               ReturnValue.getPointer(), Int8PtrTy),
                           ReturnValuePointer);
     }
@@ -1105,7 +1105,7 @@ void CodeGenFunction::StartFunction(GlobalDecl GD, QualType RetTy,
     llvm::Type *Ty =
         cast<llvm::GetElementPtrInst>(Addr)->getResultElementType();
     ReturnValuePointer = Address(Addr, Ty, getPointerAlign());
-    Addr = Builder.CreateAlignedLoad(Ty, Addr, getPointerAlign(), "agg.result");
+    Addr = Builder.CreateAlignedLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, Ty, Addr, getPointerAlign(), "agg.result");
     ReturnValue =
         Address(Addr, ConvertType(RetTy), CGM.getNaturalTypeAlignment(RetTy));
   } else {
@@ -1913,8 +1913,9 @@ static void emitNonZeroVLAInit(CodeGenFunction &CGF, QualType baseType,
 
   Address begin =
     Builder.CreateElementBitCast(dest, CGF.Int8Ty, "vla.begin");
-  llvm::Value *end = Builder.CreateInBoundsGEP(
-      begin.getElementType(), begin.getPointer(), sizeInChars, "vla.end");
+  llvm::Value *end = CGF.CGM.getCodeGenOpts().DropInboundsFromGEP
+    ? Builder.CreateGEP( begin.getElementType(), begin.getPointer(), sizeInChars, "vla.end")
+    : Builder.CreateInBoundsGEP( begin.getElementType(), begin.getPointer(), sizeInChars, "vla.end");
 
   llvm::BasicBlock *originBB = CGF.Builder.GetInsertBlock();
   llvm::BasicBlock *loopBB = CGF.createBasicBlock("vla-init.loop");
@@ -1931,12 +1932,18 @@ static void emitNonZeroVLAInit(CodeGenFunction &CGF, QualType baseType,
     dest.getAlignment().alignmentOfArrayElement(baseSize);
 
   // memcpy the individual element bit-pattern.
-  Builder.CreateMemCpy(Address(cur, CGF.Int8Ty, curAlign), src, baseSizeInChars,
+  Address Dest = Address(cur, CGF.Int8Ty, curAlign);
+  if (!CGF.CGM.getCodeGenOpts().UseDefaultAlignment) {
+    Dest = Dest.withAlignment(CharUnits::One()); 
+    src = src.withAlignment(CharUnits::One()); 
+  }
+  Builder.CreateMemCpy(Dest, src, baseSizeInChars,
                        /*volatile*/ false);
 
   // Go to the next element.
-  llvm::Value *next =
-    Builder.CreateInBoundsGEP(CGF.Int8Ty, cur, baseSizeInChars, "vla.next");
+  llvm::Value *next = CGF.CGM.getCodeGenOpts().DropInboundsFromGEP
+    ? Builder.CreateGEP(CGF.Int8Ty, cur, baseSizeInChars, "vla.next")
+    : Builder.CreateInBoundsGEP(CGF.Int8Ty, cur, baseSizeInChars, "vla.next");
 
   // Leave if that's the end of the VLA.
   llvm::Value *done = Builder.CreateICmpEQ(next, end, "vla-init.isdone");
@@ -2009,6 +2016,10 @@ CodeGenFunction::EmitNullInitialization(Address DestPtr, QualType Ty) {
     if (vla) return emitNonZeroVLAInit(*this, Ty, DestPtr, SrcPtr, SizeVal);
 
     // Get and call the appropriate llvm.memcpy overload.
+    if (!CGM.getCodeGenOpts().UseDefaultAlignment) {
+      DestPtr = DestPtr.withAlignment(CharUnits::One()); 
+      SrcPtr = SrcPtr.withAlignment(CharUnits::One()); 
+    }
     Builder.CreateMemCpy(DestPtr, SrcPtr, SizeVal, false);
     return;
   }
@@ -2016,7 +2027,7 @@ CodeGenFunction::EmitNullInitialization(Address DestPtr, QualType Ty) {
   // Otherwise, just memset the whole thing to zero.  This is legal
   // because in LLVM, all default initializers (other than the ones we just
   // handled above) are guaranteed to have a bit pattern of all zeros.
-  Builder.CreateMemSet(DestPtr, Builder.getInt8(0), SizeVal, false);
+  Builder.CreateMemSet(CGM.getCodeGenOpts().UseDefaultAlignment ? DestPtr : DestPtr.withAlignment(CharUnits::One()), Builder.getInt8(0), SizeVal, false);
 }
 
 llvm::BlockAddress *CodeGenFunction::GetAddrOfLabel(const LabelDecl *L) {
@@ -2121,8 +2132,9 @@ llvm::Value *CodeGenFunction::emitArrayLength(const ArrayType *origArrayType,
     addr = Builder.CreateElementBitCast(addr, baseType, "array.begin");
   } else {
     // Create the actual GEP.
-    addr = Address(Builder.CreateInBoundsGEP(
-        addr.getElementType(), addr.getPointer(), gepIndices, "array.begin"),
+    addr = Address(CGM.getCodeGenOpts().DropInboundsFromGEP
+        ? Builder.CreateGEP(addr.getElementType(), addr.getPointer(), gepIndices, "array.begin")
+        : Builder.CreateInBoundsGEP(addr.getElementType(), addr.getPointer(), gepIndices, "array.begin"),
         ConvertTypeForMem(eltType),
         addr.getAlignment());
   }

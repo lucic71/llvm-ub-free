@@ -1943,6 +1943,27 @@ defm delete_null_pointer_checks : BoolFOption<"delete-null-pointer-checks",
   PosFlag<SetFalse, [], "Treat usage of null pointers as undefined behavior (default)">,
   BothFlags<[CoreOption]>>;
 
+defm use_default_alignment : BoolFOption<"use-default-alignment",
+  CodeGenOpts<"UseDefaultAlignment">, DefaultTrue,
+  NegFlag<SetFalse, [CC1Option], "Align all memory accesses to 1">,
+  PosFlag<SetTrue,  [CC1Option], "Use default alignment">,
+  BothFlags<[CoreOption]>>;
+
+defm constrain_bool_value : BoolFOption<"constrain-bool-value",
+  CodeGenOpts<"ConstrainBoolValue">, DefaultFalse,
+  NegFlag<SetFalse, [CC1Option], "Do not constrain bool values to {0,1}">,
+  PosFlag<SetTrue,  [CC1Option], "Constrain bool values to {0,1} (default)">>;
+
+defm drop_inbounds_from_gep : BoolFOption<"drop-inbounds-from-gep",
+  CodeGenOpts<"DropInboundsFromGEP">, DefaultTrue,
+  NegFlag<SetFalse, [CC1Option], "Do not drop inbounds from GEPs (default)">,
+  PosFlag<SetTrue,  [CC1Option], "Drop inbounds from GEPs">>;
+
+defm check_div_rem_overflow : BoolFOption<"check-div-rem-overflow",
+  CodeGenOpts<"CheckDivRemOverflow">, DefaultTrue,
+  NegFlag<SetFalse, [CC1Option], "Do not check div/rem ops for overflow (default)">,
+  PosFlag<SetTrue,  [CC1Option], "Check div/rem ops for overflow">>;
+
 defm constrain_shift_value : BoolFOption<"constrain-shift-value",
   CodeGenOpts<"ConstrainShiftValue">, DefaultFalse,
   PosFlag<SetTrue, [], "Do not treat oversized shift as undefined behavior">,

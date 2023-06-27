@@ -164,6 +164,8 @@ static cl::opt<bool> SimplifyAllLoads("attributor-simplify-all-loads",
                                       cl::desc("Try to simplify all loads."),
                                       cl::init(true));
 
+extern cl::opt<bool> ZeroUninitLoads;
+
 /// Logic operators for the change status enum class.
 ///
 ///{
@@ -220,17 +222,22 @@ bool AA::isDynamicallyUnique(Attributor &A, const AbstractAttribute &QueryingAA,
 
 Constant *AA::getInitialValueForObj(Value &Obj, Type &Ty,
                                     const TargetLibraryInfo *TLI) {
-  if (isa<AllocaInst>(Obj))
-    return UndefValue::get(&Ty);
-  if (Constant *Init = getInitialValueOfAllocation(&Obj, TLI, &Ty))
+  if (isa<AllocaInst>(Obj)) {
+    if (ZeroUninitLoads) return Constant::getNullValue(&Ty);
+    else return UndefValue::get(&Ty);
+  }
+    
+  if (Constant *Init = getInitialValueOfAllocation(&Obj, TLI, &Ty, /*isUsedForLoad*/ true))
     return Init;
   auto *GV = dyn_cast<GlobalVariable>(&Obj);
   if (!GV)
     return nullptr;
   if (!GV->hasLocalLinkage() && !(GV->isConstant() && GV->hasInitializer()))
     return nullptr;
-  if (!GV->hasInitializer())
-    return UndefValue::get(&Ty);
+  if (!GV->hasInitializer()) {
+    if (ZeroUninitLoads) return Constant::getNullValue(&Ty);
+    else return UndefValue::get(&Ty);
+  }
   return dyn_cast_or_null<Constant>(getWithType(*GV->getInitializer(), Ty));
 }
 
