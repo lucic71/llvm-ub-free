@@ -53,6 +53,7 @@
 #include "llvm/Support/TargetParser.h"
 #include "llvm/Support/YAMLParser.h"
 #include <cctype>
+#include <iostream>
 
 using namespace clang::driver;
 using namespace clang::driver::tools;
@@ -5109,7 +5110,8 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   if (!Args.hasFlag(options::OPT_fconstrain_shift_value,
                    options::OPT_fno_constrain_shift_value, false))
     CmdArgs.push_back("-fno-constrain-shift-value");
-
+  else
+    CmdArgs.push_back("-fconstrain-shift-value");
   // LLVM Code Generator Options.
 
   for (const Arg *A : Args.filtered(options::OPT_frewrite_map_file_EQ)) {
