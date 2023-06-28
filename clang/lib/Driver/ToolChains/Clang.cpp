@@ -5115,6 +5115,8 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   if (Args.hasFlag(options::OPT_fconstrain_bool_value,
                    options::OPT_fno_constrain_bool_value, true))
     CmdArgs.push_back("-fconstrain-bool-value");
+  else
+    CmdArgs.push_back("-fno-constrain-bool-value");
 
   if (!Args.hasFlag(options::OPT_fdrop_inbounds_from_gep,
                    options::OPT_fno_drop_inbounds_from_gep, false))

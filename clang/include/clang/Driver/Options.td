@@ -1950,7 +1950,7 @@ defm use_default_alignment : BoolFOption<"use-default-alignment",
   BothFlags<[CoreOption]>>;
 
 defm constrain_bool_value : BoolFOption<"constrain-bool-value",
-  CodeGenOpts<"ConstrainBoolValue">, DefaultFalse,
+  CodeGenOpts<"ConstrainBoolValue">, DefaultTrue,
   NegFlag<SetFalse, [CC1Option], "Do not constrain bool values to {0,1}">,
   PosFlag<SetTrue,  [CC1Option], "Constrain bool values to {0,1} (default)">>;
 
