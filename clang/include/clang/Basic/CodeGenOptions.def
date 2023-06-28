@@ -483,10 +483,10 @@ ENUM_CODEGENOPT(ZeroCallUsedRegs, llvm::ZeroCallUsedRegs::ZeroCallUsedRegsKind,
 CODEGENOPT(OpaquePointers, 1, 0)
 
 /// Whether to constrain left or right shift value.
-CODEGENOPT(NoConstrainShiftValue, 1, 0)
+CODEGENOPT(ConstrainShiftValue, 1, 0)
 
 /// Whether to constrain bool values.
-CODEGENOPT(ConstrainBoolValue, 1, 0)
+CODEGENOPT(ConstrainBoolValue, 1, 1)
 
 #undef CODEGENOPT
 #undef ENUM_CODEGENOPT

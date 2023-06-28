@@ -1944,15 +1944,15 @@ defm delete_null_pointer_checks : BoolFOption<"delete-null-pointer-checks",
   BothFlags<[CoreOption]>>;
 
 defm constrain_bool_value : BoolFOption<"constrain-bool-value",
-  CodeGenOpts<"ConstrainBoolValue">, DefaultFalse,
+  CodeGenOpts<"ConstrainBoolValue">, DefaultTrue,
   NegFlag<SetFalse, [CC1Option], "Do not constrain bool values to {0,1}">,
-  PosFlag<SetTrue,  [CC1Option], "Constrain bool values to {0,1}">>;
+  PosFlag<SetTrue,  [CC1Option], "Constrain bool values to {0,1} (default)">>;
 
 defm constrain_shift_value : BoolFOption<"constrain-shift-value",
-  CodeGenOpts<"NoConstrainShiftValue">, DefaultFalse,
-  PosFlag<SetFalse, [], "Do not treat oversized shift as undefined behavior">,
-  NegFlag<SetTrue, [CC1Option], "Treat usage of oversized shift as undefined behavior (default)">,
-  BothFlags<[CoreOption]>>;
+  CodeGenOpts<"ConstrainShiftValue">, DefaultFalse,
+  PosFlag<SetTrue, [], "Do not treat oversized shift as undefined behavior">,
+  NegFlag<SetFalse, [], "Treat usage of oversized shift as undefined behavior (default)">,
+  BothFlags<[CC1Option]>>;
 
 def frewrite_map_file_EQ : Joined<["-"], "frewrite-map-file=">,
                            Group<f_Group>,
