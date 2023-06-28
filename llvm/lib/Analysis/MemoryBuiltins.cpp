@@ -37,6 +37,7 @@
 #include "llvm/IR/Type.h"
 #include "llvm/IR/Value.h"
 #include "llvm/Support/Casting.h"
+#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/raw_ostream.h"
@@ -50,6 +51,10 @@
 using namespace llvm;
 
 #define DEBUG_TYPE "memory-builtins"
+
+cl::opt<bool> ZeroUninitLoads("zero-uninit-loads",
+                                    llvm::cl::desc("Replace uninit loads with zero loads"),
+                                    cl::init(false));
 
 enum AllocType : uint8_t {
   OpNewLike          = 1<<0, // allocates; never returns null
@@ -452,22 +457,30 @@ llvm::getAllocSize(const CallBase *CB, const TargetLibraryInfo *TLI,
 
 Constant *llvm::getInitialValueOfAllocation(const Value *V,
                                             const TargetLibraryInfo *TLI,
-                                            Type *Ty) {
+                                            Type *Ty, bool isUsedForLoad) {
   auto *Alloc = dyn_cast<CallBase>(V);
   if (!Alloc)
     return nullptr;
 
   // malloc and aligned_alloc are uninitialized (undef)
-  if (isMallocLikeFn(Alloc, TLI) || isAlignedAllocLikeFn(Alloc, TLI))
-    return UndefValue::get(Ty);
+  if (isMallocLikeFn(Alloc, TLI) || isAlignedAllocLikeFn(Alloc, TLI)) {
+    if (ZeroUninitLoads && isUsedForLoad)
+      return Constant::getNullValue(Ty);
+    else
+      return UndefValue::get(Ty);
+  }
 
   // calloc zero initializes
   if (isCallocLikeFn(Alloc, TLI))
     return Constant::getNullValue(Ty);
 
   AllocFnKind AK = getAllocFnKind(Alloc);
-  if ((AK & AllocFnKind::Uninitialized) != AllocFnKind::Unknown)
-    return UndefValue::get(Ty);
+  if ((AK & AllocFnKind::Uninitialized) != AllocFnKind::Unknown) {
+    if (ZeroUninitLoads && isUsedForLoad)
+      return Constant::getNullValue(Ty);
+    else
+      return UndefValue::get(Ty);
+  }
   if ((AK & AllocFnKind::Zeroed) != AllocFnKind::Unknown)
     return Constant::getNullValue(Ty);
 

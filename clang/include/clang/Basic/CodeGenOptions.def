@@ -488,6 +488,15 @@ CODEGENOPT(ConstrainShiftValue, 1, 0)
 /// Whether to constrain bool values.
 CODEGENOPT(ConstrainBoolValue, 1, 1)
 
+/// Whether to drop inbounds for GEP
+CODEGENOPT(DropInboundsFromGEP, 1, 0)
+
+/// Whether to drop inbounds for GEP
+CODEGENOPT(CheckDivRemOverflow, 1, 0)
+
+/// Whether to align all memory to 1.
+CODEGENOPT(UseDefaultAlignment, 1, 1)
+
 #undef CODEGENOPT
 #undef ENUM_CODEGENOPT
 #undef VALUE_CODEGENOPT

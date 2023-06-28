@@ -101,6 +101,8 @@ STATISTIC(MaxBBSpeculationCutoffReachedTimes,
           "Number of times we we reached gvn-max-block-speculations cut-off "
           "preventing further exploration");
 
+extern cl::opt<bool> ZeroUninitLoads;
+
 static cl::opt<bool> GVNEnablePRE("enable-pre", cl::init(true), cl::Hidden);
 static cl::opt<bool> GVNEnableLoadPRE("enable-load-pre", cl::init(true));
 static cl::opt<bool> GVNEnableLoadInLoopPRE("enable-load-in-loop-pre",
@@ -1228,12 +1230,14 @@ bool GVNPass::AnalyzeLoadAvailability(LoadInst *Load, MemDepResult DepInfo,
   // Loading the alloca -> undef.
   // Loading immediately after lifetime begin -> undef.
   if (isa<AllocaInst>(DepInst) || isLifetimeStart(DepInst)) {
-    Res = AvailableValue::get(UndefValue::get(Load->getType()));
+    Res = ZeroUninitLoads
+      ? AvailableValue::get(Constant::getNullValue(Load->getType()))
+      : AvailableValue::get(UndefValue::get(Load->getType()));
     return true;
   }
 
   if (Constant *InitVal =
-          getInitialValueOfAllocation(DepInst, TLI, Load->getType())) {
+          getInitialValueOfAllocation(DepInst, TLI, Load->getType(), /*isUsedForLoad*/ true)) {
     Res = AvailableValue::get(InitVal);
     return true;
   }

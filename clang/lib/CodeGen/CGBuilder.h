@@ -69,52 +69,101 @@ public:
   // Note that we intentionally hide the CreateLoad APIs that don't
   // take an alignment.
   llvm::LoadInst *CreateLoad(Address Addr, const llvm::Twine &Name = "") {
-    return CreateAlignedLoad(Addr.getElementType(), Addr.getPointer(),
+      return CreateAlignedLoad(Addr.getElementType(), Addr.getPointer(),
                              Addr.getAlignment().getAsAlign(), Name);
   }
   llvm::LoadInst *CreateLoad(Address Addr, const char *Name) {
     // This overload is required to prevent string literals from
     // ending up in the IsVolatile overload.
-    return CreateAlignedLoad(Addr.getElementType(), Addr.getPointer(),
+      return CreateAlignedLoad(Addr.getElementType(), Addr.getPointer(),
                              Addr.getAlignment().getAsAlign(), Name);
   }
   llvm::LoadInst *CreateLoad(Address Addr, bool IsVolatile,
                              const llvm::Twine &Name = "") {
-    return CreateAlignedLoad(Addr.getElementType(), Addr.getPointer(),
+      return CreateAlignedLoad(Addr.getElementType(), Addr.getPointer(),
+                             Addr.getAlignment().getAsAlign(), IsVolatile,
+                             Name);
+  }
+
+  llvm::LoadInst *CreateLoad(bool AlignOne, Address Addr, const llvm::Twine &Name = "") {
+		if (AlignOne)
+      return CreateAlignedLoad(Addr.getElementType(), Addr.getPointer(),
+                             llvm::MaybeAlign(1), Name);
+		else
+      return CreateAlignedLoad(Addr.getElementType(), Addr.getPointer(),
+                             Addr.getAlignment().getAsAlign(), Name);
+  }
+  llvm::LoadInst *CreateLoad(bool AlignOne, Address Addr, const char *Name) {
+    // This overload is required to prevent string literals from
+    // ending up in the IsVolatile overload.
+		if (AlignOne)
+      return CreateAlignedLoad(Addr.getElementType(), Addr.getPointer(),
+                             llvm::MaybeAlign(1), Name);
+		else
+      return CreateAlignedLoad(Addr.getElementType(), Addr.getPointer(),
+                             Addr.getAlignment().getAsAlign(), Name);
+  }
+  llvm::LoadInst *CreateLoad(bool AlignOne, Address Addr, bool IsVolatile,
+                             const llvm::Twine &Name = "") {
+		if (AlignOne)
+      return CreateAlignedLoad(Addr.getElementType(), Addr.getPointer(),
+                             llvm::MaybeAlign(1), IsVolatile,
+                             Name);
+		else
+      return CreateAlignedLoad(Addr.getElementType(), Addr.getPointer(),
                              Addr.getAlignment().getAsAlign(), IsVolatile,
                              Name);
   }
 
   using CGBuilderBaseTy::CreateAlignedLoad;
-  llvm::LoadInst *CreateAlignedLoad(llvm::Type *Ty, llvm::Value *Addr,
+  llvm::LoadInst *CreateAlignedLoad(bool AlignOne, llvm::Type *Ty, llvm::Value *Addr,
                                     CharUnits Align,
                                     const llvm::Twine &Name = "") {
     assert(llvm::cast<llvm::PointerType>(Addr->getType())
                ->isOpaqueOrPointeeTypeMatches(Ty));
-    return CreateAlignedLoad(Ty, Addr, Align.getAsAlign(), Name);
+		if (AlignOne)
+      return CreateAlignedLoad(Ty, Addr, llvm::MaybeAlign(1), Name);
+		else
+      return CreateAlignedLoad(Ty, Addr, Align.getAsAlign(), Name);
   }
 
   // Note that we intentionally hide the CreateStore APIs that don't
   // take an alignment.
   llvm::StoreInst *CreateStore(llvm::Value *Val, Address Addr,
                                bool IsVolatile = false) {
-    return CreateAlignedStore(Val, Addr.getPointer(),
+      return CreateAlignedStore(Val, Addr.getPointer(),
+                              Addr.getAlignment().getAsAlign(), IsVolatile);
+  }
+
+  llvm::StoreInst *CreateStore(bool AlignOne, llvm::Value *Val, Address Addr,
+                               bool IsVolatile = false) {
+		if (AlignOne)
+      return CreateAlignedStore(Val, Addr.getPointer(),
+                              llvm::MaybeAlign(1), IsVolatile);
+		else
+      return CreateAlignedStore(Val, Addr.getPointer(),
                               Addr.getAlignment().getAsAlign(), IsVolatile);
   }
 
   using CGBuilderBaseTy::CreateAlignedStore;
-  llvm::StoreInst *CreateAlignedStore(llvm::Value *Val, llvm::Value *Addr,
+  llvm::StoreInst *CreateAlignedStore(bool AlignOne, llvm::Value *Val, llvm::Value *Addr,
                                       CharUnits Align,
                                       bool IsVolatile = false) {
-    return CreateAlignedStore(Val, Addr, Align.getAsAlign(), IsVolatile);
+		if (AlignOne)
+      return CreateAlignedStore(Val, Addr, llvm::MaybeAlign(1), IsVolatile);
+		else
+      return CreateAlignedStore(Val, Addr, Align.getAsAlign(), IsVolatile);
   }
 
   // FIXME: these "default-aligned" APIs should be removed,
   // but I don't feel like fixing all the builtin code right now.
-  llvm::StoreInst *CreateDefaultAlignedStore(llvm::Value *Val,
+  llvm::StoreInst *CreateDefaultAlignedStore(bool AlignOne, llvm::Value *Val,
                                              llvm::Value *Addr,
                                              bool IsVolatile = false) {
-    return CGBuilderBaseTy::CreateStore(Val, Addr, IsVolatile);
+		if (AlignOne)
+      return CGBuilderBaseTy::CreateAlignedStore(Val, Addr, llvm::MaybeAlign(1), IsVolatile);
+		else
+      return CGBuilderBaseTy::CreateAlignedStore(Val, Addr, llvm::MaybeAlign(), IsVolatile);
   }
 
   /// Emit a load from an i1 flag variable.
@@ -122,14 +171,14 @@ public:
                                  const llvm::Twine &Name = "") {
     assert(llvm::cast<llvm::PointerType>(Addr->getType())
                ->isOpaqueOrPointeeTypeMatches(getInt1Ty()));
-    return CreateAlignedLoad(getInt1Ty(), Addr, CharUnits::One(), Name);
+    return CreateAlignedLoad(true, getInt1Ty(), Addr, CharUnits::One(), Name);
   }
 
   /// Emit a store to an i1 flag variable.
   llvm::StoreInst *CreateFlagStore(bool Value, llvm::Value *Addr) {
     assert(llvm::cast<llvm::PointerType>(Addr->getType())
                ->isOpaqueOrPointeeTypeMatches(getInt1Ty()));
-    return CreateAlignedStore(getInt1(Value), Addr, CharUnits::One());
+    return CreateAlignedStore(true, getInt1(Value), Addr, CharUnits::One());
   }
 
   // Temporarily use old signature; clang will be updated to an Address overload
@@ -200,6 +249,27 @@ public:
         CreateStructGEP(Addr.getElementType(), Addr.getPointer(), Index, Name),
         ElTy->getElementType(Index),
         Addr.getAlignment().alignmentAtOffset(Offset));
+  }
+  /// Given
+  ///   %addr = [n x T]* ...
+  /// produce
+  ///   %name = getelementptr %addr, i64 0, i64 index
+  /// where i64 is actually the target word size.
+  ///
+  /// This API assumes that drilling into an array like this is always
+  /// an inbounds operation.
+  Address CreateConstArrayGEPForceNoInBounds(Address Addr, uint64_t Index,
+                              const llvm::Twine &Name = "") {
+    llvm::ArrayType *ElTy = cast<llvm::ArrayType>(Addr.getElementType());
+    const llvm::DataLayout &DL = BB->getParent()->getParent()->getDataLayout();
+    CharUnits EltSize =
+        CharUnits::fromQuantity(DL.getTypeAllocSize(ElTy->getElementType()));
+
+    return Address(
+        CreateGEP(Addr.getElementType(), Addr.getPointer(),
+                          {getSize(CharUnits::Zero()), getSize(Index)}, Name),
+        ElTy->getElementType(),
+        Addr.getAlignment().alignmentAtOffset(Index * EltSize));
   }
 
   /// Given
@@ -290,6 +360,24 @@ public:
                    Addr.getElementType(),
                    Addr.getAlignment().alignmentAtOffset(Offset));
   }
+
+  using CGBuilderBaseTy::CreateConstGEP2_32;
+  Address CreateConstGEP2_32(Address Addr, unsigned Idx0, unsigned Idx1,
+                                     const llvm::Twine &Name = "") {
+    const llvm::DataLayout &DL = BB->getParent()->getParent()->getDataLayout();
+
+    auto *GEP = cast<llvm::GetElementPtrInst>(CreateConstGEP2_32(
+        Addr.getElementType(), Addr.getPointer(), Idx0, Idx1, Name));
+    llvm::APInt Offset(
+        DL.getIndexSizeInBits(Addr.getType()->getPointerAddressSpace()), 0,
+        /*isSigned=*/true);
+    if (!GEP->accumulateConstantOffset(DL, Offset))
+      llvm_unreachable("offset of GEP with constants is always computable");
+    return Address(GEP, GEP->getResultElementType(),
+                   Addr.getAlignment().alignmentAtOffset(
+                       CharUnits::fromQuantity(Offset.getSExtValue())));
+  }
+
 
   using CGBuilderBaseTy::CreateConstInBoundsGEP2_32;
   Address CreateConstInBoundsGEP2_32(Address Addr, unsigned Idx0, unsigned Idx1,

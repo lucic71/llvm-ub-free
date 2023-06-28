@@ -2065,7 +2065,7 @@ CGObjCMac::GenerateMessageSendSuper(CodeGen::CodeGenFunction &CGF,
                          "objc_super");
   llvm::Value *ReceiverAsObject =
     CGF.Builder.CreateBitCast(Receiver, ObjCTypes.ObjectPtrTy);
-  CGF.Builder.CreateStore(ReceiverAsObject,
+  CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, ReceiverAsObject,
                           CGF.Builder.CreateStructGEP(ObjCSuper, 0));
 
   // If this is a class message the metaclass is passed as the target.
@@ -2081,13 +2081,13 @@ CGObjCMac::GenerateMessageSendSuper(CodeGen::CodeGenFunction &CGF,
       // isa" is the first ivar in a class (which it must be).
       Target = EmitClassRef(CGF, Class->getSuperClass());
       Target = CGF.Builder.CreateStructGEP(ObjCTypes.ClassTy, Target, 0);
-      Target = CGF.Builder.CreateAlignedLoad(ClassTyPtr, Target,
+      Target = CGF.Builder.CreateAlignedLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, ClassTyPtr, Target,
                                              CGF.getPointerAlign());
     } else {
       llvm::Constant *MetaClassPtr = EmitMetaClassRef(Class);
       llvm::Value *SuperPtr =
           CGF.Builder.CreateStructGEP(ObjCTypes.ClassTy, MetaClassPtr, 1);
-      llvm::Value *Super = CGF.Builder.CreateAlignedLoad(ClassTyPtr, SuperPtr,
+      llvm::Value *Super = CGF.Builder.CreateAlignedLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, ClassTyPtr, SuperPtr,
                                                          CGF.getPointerAlign());
       Target = Super;
     }
@@ -2096,7 +2096,7 @@ CGObjCMac::GenerateMessageSendSuper(CodeGen::CodeGenFunction &CGF,
   else {
     llvm::Value *ClassPtr = EmitSuperClassRef(Class);
     ClassPtr = CGF.Builder.CreateStructGEP(ObjCTypes.ClassTy, ClassPtr, 1);
-    Target = CGF.Builder.CreateAlignedLoad(ClassTyPtr, ClassPtr,
+    Target = CGF.Builder.CreateAlignedLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, ClassTyPtr, ClassPtr,
                                            CGF.getPointerAlign());
   }
   // FIXME: We shouldn't need to do this cast, rectify the ASTContext and
@@ -2104,7 +2104,7 @@ CGObjCMac::GenerateMessageSendSuper(CodeGen::CodeGenFunction &CGF,
   llvm::Type *ClassTy =
     CGM.getTypes().ConvertType(CGF.getContext().getObjCClassType());
   Target = CGF.Builder.CreateBitCast(Target, ClassTy);
-  CGF.Builder.CreateStore(Target, CGF.Builder.CreateStructGEP(ObjCSuper, 1));
+  CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, Target, CGF.Builder.CreateStructGEP(ObjCSuper, 1));
   return EmitMessageSend(CGF, Return, ResultType, Sel, ObjCSuper.getPointer(),
                          ObjCTypes.SuperPtrCTy, true, CallArgs, Method, Class,
                          ObjCTypes);
@@ -4028,7 +4028,7 @@ void CGObjCCommonMac::GenerateDirectMethodPrologue(
   auto &Builder = CGF.Builder;
   bool ReceiverCanBeNull = true;
   auto selfAddr = CGF.GetAddrOfLocalVar(OMD->getSelfDecl());
-  auto selfValue = Builder.CreateLoad(selfAddr);
+  auto selfValue = Builder.CreateLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, selfAddr);
 
   // Generate:
   //
@@ -4062,7 +4062,7 @@ void CGObjCCommonMac::GenerateDirectMethodPrologue(
     result = GeneratePossiblySpecializedMessageSend(
         CGF, ReturnValueSlot(), ResultType, SelfSel, selfValue, Args, OID,
         nullptr, true);
-    Builder.CreateStore(result.getScalarVal(), selfAddr);
+    Builder.CreateStore(!CGM.getCodeGenOpts().UseDefaultAlignment, result.getScalarVal(), selfAddr);
 
     // Nullable `Class` expressions cannot be messaged with a direct method
     // so the only reason why the receive can be null would be because
@@ -4102,7 +4102,7 @@ void CGObjCCommonMac::GenerateDirectMethodPrologue(
 
   // only synthesize _cmd if it's referenced
   if (OMD->getCmdDecl()->isUsed()) {
-    Builder.CreateStore(GetSelector(CGF, OMD),
+    Builder.CreateStore(!CGM.getCodeGenOpts().UseDefaultAlignment, GetSelector(CGF, OMD),
                         CGF.GetAddrOfLocalVar(OMD->getCmdDecl()));
   }
 }
@@ -4260,7 +4260,7 @@ namespace {
         CGF.createBasicBlock("finally.call_exit");
       llvm::BasicBlock *FinallyNoCallExit =
         CGF.createBasicBlock("finally.no_call_exit");
-      CGF.Builder.CreateCondBr(CGF.Builder.CreateLoad(CallTryExitVar),
+      CGF.Builder.CreateCondBr(CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, CallTryExitVar),
                                FinallyCallExit, FinallyNoCallExit);
 
       CGF.EmitBlock(FinallyCallExit);
@@ -4278,12 +4278,12 @@ namespace {
           // Save the current cleanup destination in case there's
           // control flow inside the finally statement.
           llvm::Value *CurCleanupDest =
-            CGF.Builder.CreateLoad(CGF.getNormalCleanupDestSlot());
+            CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, CGF.getNormalCleanupDestSlot());
 
           CGF.EmitStmt(FinallyStmt->getFinallyBody());
 
           if (CGF.HaveInsertPoint()) {
-            CGF.Builder.CreateStore(CurCleanupDest,
+            CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, CurCleanupDest,
                                     CGF.getNormalCleanupDestSlot());
           } else {
             // Currently, the end of the cleanup must always exist.
@@ -4293,7 +4293,7 @@ namespace {
       } else {
         // Emit objc_sync_exit(expr); as finally's sole statement for
         // @synchronized.
-        llvm::Value *SyncArg = CGF.Builder.CreateLoad(SyncArgSlot);
+        llvm::Value *SyncArg = CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, SyncArgSlot);
         CGF.EmitNounwindRuntimeCall(ObjCTypes.getSyncExitFn(), SyncArg);
       }
     }
@@ -4596,7 +4596,7 @@ void CGObjCMac::EmitTryOrSynchronizedStmt(CodeGen::CodeGenFunction &CGF,
 
     SyncArgSlot = CGF.CreateTempAlloca(SyncArg->getType(),
                                        CGF.getPointerAlign(), "sync.arg");
-    CGF.Builder.CreateStore(SyncArg, SyncArgSlot);
+    CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, SyncArg, SyncArgSlot);
   }
 
   // Allocate memory for the setjmp buffer.  This needs to be kept
@@ -4660,7 +4660,7 @@ void CGObjCMac::EmitTryOrSynchronizedStmt(CodeGen::CodeGenFunction &CGF,
 
   // Emit the protected block.
   CGF.EmitBlock(TryBlock);
-  CGF.Builder.CreateStore(CGF.Builder.getTrue(), CallTryExitVar);
+  CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, CGF.Builder.getTrue(), CallTryExitVar);
   CGF.EmitStmt(isTry ? cast<ObjCAtTryStmt>(S).getTryBody()
                      : cast<ObjCAtSynchronizedStmt>(S).getSynchBody());
 
@@ -4676,7 +4676,7 @@ void CGObjCMac::EmitTryOrSynchronizedStmt(CodeGen::CodeGenFunction &CGF,
   // through the cleanup to the rethrow block.
   if (!isTry || !cast<ObjCAtTryStmt>(S).getNumCatchStmts()) {
     // Tell the cleanup not to re-pop the exit.
-    CGF.Builder.CreateStore(CGF.Builder.getFalse(), CallTryExitVar);
+    CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, CGF.Builder.getFalse(), CallTryExitVar);
     CGF.EmitBranchThroughCleanup(FinallyRethrow);
 
   // Otherwise, we have to match against the caught exceptions.
@@ -4703,7 +4703,7 @@ void CGObjCMac::EmitTryOrSynchronizedStmt(CodeGen::CodeGenFunction &CGF,
       PropagatingExnVar = CGF.CreateTempAlloca(Caught->getType(),
                                                CGF.getPointerAlign(),
                                                "propagating_exception");
-      CGF.Builder.CreateStore(Caught, PropagatingExnVar);
+      CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, Caught, PropagatingExnVar);
 
       // Enter a new exception try block (in case a @catch block
       // throws an exception).
@@ -4725,7 +4725,7 @@ void CGObjCMac::EmitTryOrSynchronizedStmt(CodeGen::CodeGenFunction &CGF,
       CGF.EmitBlock(CatchBlock);
     }
 
-    CGF.Builder.CreateStore(CGF.Builder.getInt1(HasFinally), CallTryExitVar);
+    CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, CGF.Builder.getInt1(HasFinally), CallTryExitVar);
 
     // Handle catch list. As a special case we check if everything is
     // matched and avoid generating code for falling off the end if
@@ -4842,10 +4842,10 @@ void CGObjCMac::EmitTryOrSynchronizedStmt(CodeGen::CodeGenFunction &CGF,
       llvm::CallInst *NewCaught =
         CGF.EmitNounwindRuntimeCall(ObjCTypes.getExceptionExtractFn(),
                                     ExceptionData.getPointer(), "caught");
-      CGF.Builder.CreateStore(NewCaught, PropagatingExnVar);
+      CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, NewCaught, PropagatingExnVar);
 
       // Don't pop the catch handler; the throw already did.
-      CGF.Builder.CreateStore(CGF.Builder.getFalse(), CallTryExitVar);
+      CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, CGF.Builder.getFalse(), CallTryExitVar);
       CGF.EmitBranchThroughCleanup(FinallyRethrow);
     }
   }
@@ -4856,7 +4856,7 @@ void CGObjCMac::EmitTryOrSynchronizedStmt(CodeGen::CodeGenFunction &CGF,
   // Pop the cleanup.
   CGF.Builder.restoreIP(TryFallthroughIP);
   if (CGF.HaveInsertPoint())
-    CGF.Builder.CreateStore(CGF.Builder.getTrue(), CallTryExitVar);
+    CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, CGF.Builder.getTrue(), CallTryExitVar);
   CGF.PopCleanupBlock();
   CGF.EmitBlock(FinallyEnd.getBlock(), true);
 
@@ -4867,7 +4867,7 @@ void CGObjCMac::EmitTryOrSynchronizedStmt(CodeGen::CodeGenFunction &CGF,
     // If we have a propagating-exception variable, check it.
     llvm::Value *PropagatingExn;
     if (PropagatingExnVar.isValid()) {
-      PropagatingExn = CGF.Builder.CreateLoad(PropagatingExnVar);
+      PropagatingExn = CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, PropagatingExnVar);
 
     // Otherwise, just look in the buffer for the exception to throw.
     } else {
@@ -5235,7 +5235,7 @@ llvm::Value *CGObjCMac::EmitClassRefFromId(CodeGenFunction &CGF,
         CGM.getPointerAlign(), true);
   }
 
-  return CGF.Builder.CreateAlignedLoad(Entry->getValueType(), Entry,
+  return CGF.Builder.CreateAlignedLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, Entry->getValueType(), Entry,
                                        CGF.getPointerAlign());
 }
 
@@ -5257,7 +5257,7 @@ llvm::Value *CGObjCMac::EmitNSAutoreleasePoolClassRef(CodeGenFunction &CGF) {
 }
 
 llvm::Value *CGObjCMac::EmitSelector(CodeGenFunction &CGF, Selector Sel) {
-  return CGF.Builder.CreateLoad(EmitSelectorAddr(Sel));
+  return CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, EmitSelectorAddr(Sel));
 }
 
 Address CGObjCMac::EmitSelectorAddr(Selector Sel) {
@@ -6633,7 +6633,7 @@ llvm::Value *CGObjCNonFragileABIMac::GenerateProtocolRef(CodeGenFunction &CGF,
 
   llvm::GlobalVariable *PTGV = CGM.getModule().getGlobalVariable(ProtocolName);
   if (PTGV)
-    return CGF.Builder.CreateAlignedLoad(PTGV->getValueType(), PTGV, Align);
+    return CGF.Builder.CreateAlignedLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, PTGV->getValueType(), PTGV, Align);
   PTGV = new llvm::GlobalVariable(CGM.getModule(), Init->getType(), false,
                                   llvm::GlobalValue::WeakAnyLinkage, Init,
                                   ProtocolName);
@@ -6644,7 +6644,7 @@ llvm::Value *CGObjCNonFragileABIMac::GenerateProtocolRef(CodeGenFunction &CGF,
   if (!CGM.getTriple().isOSBinFormatMachO())
     PTGV->setComdat(CGM.getModule().getOrInsertComdat(ProtocolName));
   CGM.addUsedGlobal(PTGV);
-  return CGF.Builder.CreateAlignedLoad(PTGV->getValueType(), PTGV, Align);
+  return CGF.Builder.CreateAlignedLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, PTGV->getValueType(), PTGV, Align);
 }
 
 /// GenerateCategory - Build metadata for a category implementation.
@@ -7217,7 +7217,7 @@ CGObjCNonFragileABIMac::EmitIvarOffset(CodeGen::CodeGenFunction &CGF,
   } else {
     llvm::GlobalVariable *GV = ObjCIvarOffsetVariable(Interface, Ivar);
     IvarOffsetValue =
-        CGF.Builder.CreateAlignedLoad(GV->getValueType(), GV,
+        CGF.Builder.CreateAlignedLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, GV->getValueType(), GV,
                                       CGF.getSizeAlign(), "ivar");
     if (IsIvarOffsetKnownIdempotent(CGF, Ivar))
       cast<llvm::LoadInst>(IvarOffsetValue)
@@ -7358,7 +7358,7 @@ CGObjCNonFragileABIMac::EmitVTableMessageSend(CodeGenFunction &CGF,
 
   // Load the function to call from the message ref table.
   Address calleeAddr = CGF.Builder.CreateStructGEP(mref, 0);
-  llvm::Value *calleePtr = CGF.Builder.CreateLoad(calleeAddr, "msgSend_fn");
+  llvm::Value *calleePtr = CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, calleeAddr, "msgSend_fn");
 
   calleePtr = CGF.Builder.CreateBitCast(calleePtr, MSI.MessengerType);
   CGCallee callee(CGCalleeInfo(), calleePtr);
@@ -7458,7 +7458,7 @@ CGObjCNonFragileABIMac::EmitLoadOfClassRef(CodeGenFunction &CGF,
   }
 
   CharUnits Align = CGF.getPointerAlign();
-  return CGF.Builder.CreateAlignedLoad(Entry->getValueType(), Entry, Align);
+  return CGF.Builder.CreateAlignedLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, Entry->getValueType(), Entry, Align);
 }
 
 llvm::Value *
@@ -7550,7 +7550,7 @@ llvm::Value *CGObjCNonFragileABIMac::EmitMetaClassRef(CodeGenFunction &CGF,
     CGM.addCompilerUsedGlobal(Entry);
   }
 
-  return CGF.Builder.CreateAlignedLoad(ObjCTypes.ClassnfABIPtrTy, Entry, Align);
+  return CGF.Builder.CreateAlignedLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, ObjCTypes.ClassnfABIPtrTy, Entry, Align);
 }
 
 /// GetClass - Return a reference to the class for the given interface
@@ -7590,7 +7590,7 @@ CGObjCNonFragileABIMac::GenerateMessageSendSuper(CodeGen::CodeGenFunction &CGF,
 
   llvm::Value *ReceiverAsObject =
     CGF.Builder.CreateBitCast(Receiver, ObjCTypes.ObjectPtrTy);
-  CGF.Builder.CreateStore(ReceiverAsObject,
+  CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, ReceiverAsObject,
                           CGF.Builder.CreateStructGEP(ObjCSuper, 0));
 
   // If this is a class message the metaclass is passed as the target.
@@ -7605,7 +7605,7 @@ CGObjCNonFragileABIMac::GenerateMessageSendSuper(CodeGen::CodeGenFunction &CGF,
   llvm::Type *ClassTy =
     CGM.getTypes().ConvertType(CGF.getContext().getObjCClassType());
   Target = CGF.Builder.CreateBitCast(Target, ClassTy);
-  CGF.Builder.CreateStore(Target, CGF.Builder.CreateStructGEP(ObjCSuper, 1));
+  CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, Target, CGF.Builder.CreateStructGEP(ObjCSuper, 1));
 
   return (isVTableDispatchedSelector(Sel))
     ? EmitVTableMessageSend(CGF, Return, ResultType, Sel,
@@ -7620,7 +7620,7 @@ llvm::Value *CGObjCNonFragileABIMac::EmitSelector(CodeGenFunction &CGF,
                                                   Selector Sel) {
   Address Addr = EmitSelectorAddr(Sel);
 
-  llvm::LoadInst* LI = CGF.Builder.CreateLoad(Addr);
+  llvm::LoadInst* LI = CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, Addr);
   LI->setMetadata(CGM.getModule().getMDKindID("invariant.load"),
                   llvm::MDNode::get(VMContext, None));
   return LI;

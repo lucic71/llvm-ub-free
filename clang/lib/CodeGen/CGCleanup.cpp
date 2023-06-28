@@ -43,7 +43,7 @@ DominatingValue<RValue>::saved_type::save(CodeGenFunction &CGF, RValue rv) {
     // Everything else needs an alloca.
     Address addr =
       CGF.CreateDefaultAlignTempAlloca(V->getType(), "saved-rvalue");
-    CGF.Builder.CreateStore(V, addr);
+    CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, V, addr);
     return saved_type(addr.getPointer(), nullptr, ScalarAddress);
   }
 
@@ -52,8 +52,8 @@ DominatingValue<RValue>::saved_type::save(CodeGenFunction &CGF, RValue rv) {
     llvm::Type *ComplexTy =
         llvm::StructType::get(V.first->getType(), V.second->getType());
     Address addr = CGF.CreateDefaultAlignTempAlloca(ComplexTy, "saved-complex");
-    CGF.Builder.CreateStore(V.first, CGF.Builder.CreateStructGEP(addr, 0));
-    CGF.Builder.CreateStore(V.second, CGF.Builder.CreateStructGEP(addr, 1));
+    CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, V.first, CGF.Builder.CreateStructGEP(addr, 0));
+    CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, V.second, CGF.Builder.CreateStructGEP(addr, 1));
     return saved_type(addr.getPointer(), nullptr, ComplexAddress);
   }
 
@@ -65,7 +65,7 @@ DominatingValue<RValue>::saved_type::save(CodeGenFunction &CGF, RValue rv) {
 
   Address addr =
     CGF.CreateTempAlloca(V.getType(), CGF.getPointerAlign(), "saved-rvalue");
-  CGF.Builder.CreateStore(V.getPointer(), addr);
+  CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, V.getPointer(), addr);
   return saved_type(addr.getPointer(), V.getElementType(), AggregateAddress,
                     V.getAlignment().getQuantity());
 }
@@ -83,21 +83,21 @@ RValue DominatingValue<RValue>::saved_type::restore(CodeGenFunction &CGF) {
   case ScalarLiteral:
     return RValue::get(Value);
   case ScalarAddress:
-    return RValue::get(CGF.Builder.CreateLoad(getSavingAddress(Value)));
+    return RValue::get(CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, getSavingAddress(Value)));
   case AggregateLiteral:
     return RValue::getAggregate(
         Address(Value, ElementType, CharUnits::fromQuantity(Align)));
   case AggregateAddress: {
-    auto addr = CGF.Builder.CreateLoad(getSavingAddress(Value));
+    auto addr = CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, getSavingAddress(Value));
     return RValue::getAggregate(
         Address(addr, ElementType, CharUnits::fromQuantity(Align)));
   }
   case ComplexAddress: {
     Address address = getSavingAddress(Value);
     llvm::Value *real =
-        CGF.Builder.CreateLoad(CGF.Builder.CreateStructGEP(address, 0));
+        CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, CGF.Builder.CreateStructGEP(address, 0));
     llvm::Value *imag =
-        CGF.Builder.CreateLoad(CGF.Builder.CreateStructGEP(address, 1));
+        CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, CGF.Builder.CreateStructGEP(address, 1));
     return RValue::getComplex(real, imag);
   }
   }
@@ -299,7 +299,7 @@ Address CodeGenFunction::createCleanupActiveFlag() {
   setBeforeOutermostConditional(Builder.getFalse(), active);
 
   // Initialize it to true at the current location.
-  Builder.CreateStore(Builder.getTrue(), active);
+  Builder.CreateStore(!CGM.getCodeGenOpts().UseDefaultAlignment, Builder.getTrue(), active);
 
   return active;
 }
@@ -476,10 +476,10 @@ void CodeGenFunction::PopCleanupBlocks(
       InsertBefore = Invoke->getNormalDest()->getFirstInsertionPt();
     else
       InsertBefore = std::next(Inst->getIterator());
-    CGBuilderTy(CGM, &*InsertBefore).CreateStore(Inst, Tmp);
+    CGBuilderTy(CGM, &*InsertBefore).CreateStore(!CGM.getCodeGenOpts().UseDefaultAlignment, Inst, Tmp);
 
     // Reload the value at the current insertion point.
-    *ReloadedValue = Builder.CreateLoad(Tmp);
+    *ReloadedValue = Builder.CreateLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, Tmp);
   }
 }
 
@@ -578,7 +578,7 @@ static void EmitCleanup(CodeGenFunction &CGF,
     ContBB = CGF.createBasicBlock("cleanup.done");
     llvm::BasicBlock *CleanupBB = CGF.createBasicBlock("cleanup.action");
     llvm::Value *IsActive
-      = CGF.Builder.CreateLoad(ActiveFlag, "cleanup.is_active");
+      = CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, ActiveFlag, "cleanup.is_active");
     CGF.Builder.CreateCondBr(IsActive, CleanupBB, ContBB);
     CGF.EmitBlock(CleanupBB);
   }
@@ -821,7 +821,7 @@ void CodeGenFunction::PopCleanupBlock(bool FallthroughIsBranchThrough) {
       // destination index.  For fall-throughs this is always zero.
       if (HasFallthrough) {
         if (!HasPrebranchedFallthrough)
-          Builder.CreateStore(Builder.getInt32(0), getNormalCleanupDestSlot());
+          Builder.CreateStore(!CGM.getCodeGenOpts().UseDefaultAlignment, Builder.getInt32(0), getNormalCleanupDestSlot());
 
       // Otherwise, save and clear the IP if we don't have fallthrough
       // because the cleanup is inactive.
@@ -1264,7 +1264,7 @@ static void SetupCleanupBlockActivation(CodeGenFunction &CGF,
     }
   }
 
-  CGF.Builder.CreateStore(CGF.Builder.getInt1(kind == ForActivation), var);
+  CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, CGF.Builder.getInt1(kind == ForActivation), var);
 }
 
 /// Activate a cleanup that was created in an inactivated state.

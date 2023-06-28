@@ -568,7 +568,7 @@ namespace {
     CallStackRestore(Address Stack) : Stack(Stack) {}
     bool isRedundantBeforeReturn() override { return true; }
     void Emit(CodeGenFunction &CGF, Flags flags) override {
-      llvm::Value *V = CGF.Builder.CreateLoad(Stack);
+      llvm::Value *V = CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, Stack);
       llvm::Function *F = CGF.CGM.getIntrinsic(llvm::Intrinsic::stackrestore);
       CGF.Builder.CreateCall(F, V);
     }
@@ -938,7 +938,7 @@ static void emitStoresForInitAfterBZero(CodeGenModule &CGM,
   if (isa<llvm::ConstantInt>(Init) || isa<llvm::ConstantFP>(Init) ||
       isa<llvm::ConstantVector>(Init) || isa<llvm::BlockAddress>(Init) ||
       isa<llvm::ConstantExpr>(Init)) {
-    auto *I = Builder.CreateStore(Init, Loc, isVolatile);
+    auto *I = Builder.CreateStore(!CGM.getCodeGenOpts().UseDefaultAlignment, Init, Loc, isVolatile);
     if (IsAutoInit)
       I->addAnnotationMetadata("auto-init");
     return;
@@ -952,7 +952,9 @@ static void emitStoresForInitAfterBZero(CodeGenModule &CGM,
       // If necessary, get a pointer to the element and emit it.
       if (!Elt->isNullValue() && !isa<llvm::UndefValue>(Elt))
         emitStoresForInitAfterBZero(
-            CGM, Elt, Builder.CreateConstInBoundsGEP2_32(Loc, 0, i), isVolatile,
+            CGM, Elt,
+            CGM.getCodeGenOpts().DropInboundsFromGEP ? Builder.CreateConstGEP2_32(Loc, 0, i) : Builder.CreateConstInBoundsGEP2_32(Loc, 0, i) ,
+            isVolatile,
             Builder, IsAutoInit);
     }
     return;
@@ -967,7 +969,7 @@ static void emitStoresForInitAfterBZero(CodeGenModule &CGM,
     // If necessary, get a pointer to the element and emit it.
     if (!Elt->isNullValue() && !isa<llvm::UndefValue>(Elt))
       emitStoresForInitAfterBZero(CGM, Elt,
-                                  Builder.CreateConstInBoundsGEP2_32(Loc, 0, i),
+                                  CGM.getCodeGenOpts().DropInboundsFromGEP ? Builder.CreateConstGEP2_32(Loc, 0, i) : Builder.CreateConstInBoundsGEP2_32(Loc, 0, i) ,
                                   isVolatile, Builder, IsAutoInit);
   }
 }
@@ -1181,7 +1183,7 @@ static void emitStoresForConstant(CodeGenModule &CGM, const VarDecl &D,
   bool canDoSingleStore = Ty->isIntOrIntVectorTy() ||
                           Ty->isPtrOrPtrVectorTy() || Ty->isFPOrFPVectorTy();
   if (canDoSingleStore) {
-    auto *I = Builder.CreateStore(constant, Loc, isVolatile);
+    auto *I = Builder.CreateStore(!CGM.getCodeGenOpts().UseDefaultAlignment, constant, Loc, isVolatile);
     if (IsAutoInit)
       I->addAnnotationMetadata("auto-init");
     return;
@@ -1192,7 +1194,7 @@ static void emitStoresForConstant(CodeGenModule &CGM, const VarDecl &D,
   // If the initializer is all or mostly the same, codegen with bzero / memset
   // then do a few stores afterward.
   if (shouldUseBZeroPlusStoresToInitialize(constant, ConstantSize)) {
-    auto *I = Builder.CreateMemSet(Loc, llvm::ConstantInt::get(CGM.Int8Ty, 0),
+    auto *I = Builder.CreateMemSet(CGM.getCodeGenOpts().UseDefaultAlignment ? Loc : Loc.withAlignment(CharUnits::One()), llvm::ConstantInt::get(CGM.Int8Ty, 0),
                                    SizeVal, isVolatile);
     if (IsAutoInit)
       I->addAnnotationMetadata("auto-init");
@@ -1218,7 +1220,7 @@ static void emitStoresForConstant(CodeGenModule &CGM, const VarDecl &D,
       Value = AP.getLimitedValue();
     }
     auto *I = Builder.CreateMemSet(
-        Loc, llvm::ConstantInt::get(CGM.Int8Ty, Value), SizeVal, isVolatile);
+        CGM.getCodeGenOpts().UseDefaultAlignment ? Loc : Loc.withAlignment(CharUnits::One()), llvm::ConstantInt::get(CGM.Int8Ty, Value), SizeVal, isVolatile);
     if (IsAutoInit)
       I->addAnnotationMetadata("auto-init");
     return;
@@ -1242,7 +1244,9 @@ static void emitStoresForConstant(CodeGenModule &CGM, const VarDecl &D,
       // FIXME: handle the case when ATy != Loc.getElementType().
       if (ATy == Loc.getElementType()) {
         for (unsigned i = 0; i != ATy->getNumElements(); i++) {
-          Address EltPtr = Builder.CreateConstArrayGEP(Loc, i);
+          Address EltPtr = CGM.getCodeGenOpts().DropInboundsFromGEP
+            ? Builder.CreateConstArrayGEPForceNoInBounds(Loc, i)
+            : Builder.CreateConstArrayGEP(Loc, i);
           emitStoresForConstant(
               CGM, D, EltPtr, isVolatile, Builder,
               cast<llvm::Constant>(Builder.CreateExtractValue(constant, i)),
@@ -1254,10 +1258,13 @@ static void emitStoresForConstant(CodeGenModule &CGM, const VarDecl &D,
   }
 
   // Copy from a global.
+  Address Src = createUnnamedGlobalForMemcpyFrom(CGM, D, Builder, constant, Loc.getAlignment());
+  if (!CGM.getCodeGenOpts().UseDefaultAlignment) {
+    Loc = Loc.withAlignment(CharUnits::One()); 
+    Src = Src.withAlignment(CharUnits::One()); 
+  }
   auto *I =
-      Builder.CreateMemCpy(Loc,
-                           createUnnamedGlobalForMemcpyFrom(
-                               CGM, D, Builder, constant, Loc.getAlignment()),
+      Builder.CreateMemCpy(Loc, Src,
                            SizeVal, isVolatile);
   if (IsAutoInit)
     I->addAnnotationMetadata("auto-init");
@@ -1378,7 +1385,7 @@ void CodeGenFunction::EmitAndRegisterVariableArrayDimensions(
       VLAExprNames.push_back(&Ident);
       auto SizeExprAddr =
           CreateDefaultAlignTempAlloca(VlaSize.NumElts->getType(), NameRef);
-      Builder.CreateStore(VlaSize.NumElts, SizeExprAddr);
+      Builder.CreateStore(!CGM.getCodeGenOpts().UseDefaultAlignment, VlaSize.NumElts, SizeExprAddr);
       Dimensions.emplace_back(SizeExprAddr.getPointer(),
                               Type1D.getUnqualifiedType());
     }
@@ -1517,7 +1524,7 @@ CodeGenFunction::EmitAutoVarAlloca(const VarDecl &D) {
               CreateTempAlloca(Zero->getType(), CharUnits::One(), "nrvo",
                                /*ArraySize=*/nullptr, &AllocaAddr);
           EnsureInsertPoint();
-          Builder.CreateStore(Zero, NRVOFlag);
+          Builder.CreateStore(!CGM.getCodeGenOpts().UseDefaultAlignment, Zero, NRVOFlag);
 
           // Record the NRVO flag for this variable.
           NRVOFlags[&D] = NRVOFlag.getPointer();
@@ -1584,7 +1591,7 @@ CodeGenFunction::EmitAutoVarAlloca(const VarDecl &D) {
 
       llvm::Function *F = CGM.getIntrinsic(llvm::Intrinsic::stacksave);
       llvm::Value *V = Builder.CreateCall(F);
-      Builder.CreateStore(V, Stack);
+      Builder.CreateStore(!CGM.getCodeGenOpts().UseDefaultAlignment, V, Stack);
 
       DidCallStackSave = true;
 
@@ -1759,7 +1766,7 @@ void CodeGenFunction::emitZeroOrPatternForAutoVarInit(QualType type,
       return;
     if (!EltSize.isOne())
       SizeVal = Builder.CreateNUWMul(SizeVal, CGM.getSize(EltSize));
-    auto *I = Builder.CreateMemSet(Loc, llvm::ConstantInt::get(Int8Ty, 0),
+    auto *I = Builder.CreateMemSet(CGM.getCodeGenOpts().UseDefaultAlignment ? Loc : Loc.withAlignment(CharUnits::One()), llvm::ConstantInt::get(Int8Ty, 0),
                                    SizeVal, isVolatile);
     I->addAnnotationMetadata("auto-init");
     break;
@@ -1785,8 +1792,9 @@ void CodeGenFunction::emitZeroOrPatternForAutoVarInit(QualType type,
     llvm::Value *BaseSizeInChars =
         llvm::ConstantInt::get(IntPtrTy, EltSize.getQuantity());
     Address Begin = Builder.CreateElementBitCast(Loc, Int8Ty, "vla.begin");
-    llvm::Value *End = Builder.CreateInBoundsGEP(
-        Begin.getElementType(), Begin.getPointer(), SizeVal, "vla.end");
+    llvm::Value *End =CGM.getCodeGenOpts().DropInboundsFromGEP
+      ? Builder.CreateGEP( Begin.getElementType(), Begin.getPointer(), SizeVal, "vla.end")
+      : Builder.CreateInBoundsGEP( Begin.getElementType(), Begin.getPointer(), SizeVal, "vla.end");
     llvm::BasicBlock *OriginBB = Builder.GetInsertBlock();
     EmitBlock(LoopBB);
     llvm::PHINode *Cur = Builder.CreatePHI(Begin.getType(), 2, "vla.cur");
@@ -1798,8 +1806,9 @@ void CodeGenFunction::emitZeroOrPatternForAutoVarInit(QualType type,
                                  CGM, D, Builder, Constant, ConstantAlign),
                              BaseSizeInChars, isVolatile);
     I->addAnnotationMetadata("auto-init");
-    llvm::Value *Next =
-        Builder.CreateInBoundsGEP(Int8Ty, Cur, BaseSizeInChars, "vla.next");
+    llvm::Value *Next = CGM.getCodeGenOpts().DropInboundsFromGEP
+        ? Builder.CreateGEP(Int8Ty, Cur, BaseSizeInChars, "vla.next")
+        : Builder.CreateInBoundsGEP(Int8Ty, Cur, BaseSizeInChars, "vla.next");
     llvm::Value *Done = Builder.CreateICmpEQ(Next, End, "vla-init.isdone");
     Builder.CreateCondBr(Done, ContBB, LoopBB);
     Cur->addIncoming(Next, LoopBB);
@@ -2213,8 +2222,9 @@ void CodeGenFunction::emitDestroy(Address addr, QualType type,
   }
 
   llvm::Value *begin = addr.getPointer();
-  llvm::Value *end =
-      Builder.CreateInBoundsGEP(addr.getElementType(), begin, length);
+  llvm::Value *end = CGM.getCodeGenOpts().DropInboundsFromGEP
+      ? Builder.CreateGEP(addr.getElementType(), begin, length)
+      : Builder.CreateInBoundsGEP(addr.getElementType(), begin, length);
   emitArrayDestroy(begin, end, type, elementAlign, destroyer,
                    checkZeroLength, useEHCleanupForArray);
 }
@@ -2259,8 +2269,9 @@ void CodeGenFunction::emitArrayDestroy(llvm::Value *begin,
   // Shift the address back by one element.
   llvm::Value *negativeOne = llvm::ConstantInt::get(SizeTy, -1, true);
   llvm::Type *llvmElementType = ConvertTypeForMem(elementType);
-  llvm::Value *element = Builder.CreateInBoundsGEP(
-      llvmElementType, elementPast, negativeOne, "arraydestroy.element");
+  llvm::Value *element = CGM.getCodeGenOpts().DropInboundsFromGEP
+    ? Builder.CreateGEP( llvmElementType, elementPast, negativeOne, "arraydestroy.element")
+    : Builder.CreateInBoundsGEP( llvmElementType, elementPast, negativeOne, "arraydestroy.element");
 
   if (useEHCleanup)
     pushRegularPartialArrayCleanup(begin, element, elementType, elementAlign,
@@ -2303,10 +2314,13 @@ static void emitPartialArrayDestroy(CodeGenFunction &CGF,
     llvm::Value *zero = llvm::ConstantInt::get(CGF.SizeTy, 0);
 
     SmallVector<llvm::Value*,4> gepIndices(arrayDepth+1, zero);
-    begin = CGF.Builder.CreateInBoundsGEP(
-        elemTy, begin, gepIndices, "pad.arraybegin");
-    end = CGF.Builder.CreateInBoundsGEP(
-        elemTy, end, gepIndices, "pad.arrayend");
+    begin = CGF.CGM.getCodeGenOpts().DropInboundsFromGEP
+      ? CGF.Builder.CreateGEP( elemTy, begin, gepIndices, "pad.arraybegin")
+      : CGF.Builder.CreateInBoundsGEP( elemTy, begin, gepIndices, "pad.arraybegin");
+
+    end = CGF.CGM.getCodeGenOpts().DropInboundsFromGEP
+      ? CGF.Builder.CreateGEP( elemTy, end, gepIndices, "pad.arrayend")
+      : CGF.Builder.CreateInBoundsGEP( elemTy, end, gepIndices, "pad.arrayend");
   }
 
   // Destroy the array.  We don't ever need an EH cleanup because we
@@ -2360,7 +2374,7 @@ namespace {
         ElementAlign(elementAlign) {}
 
     void Emit(CodeGenFunction &CGF, Flags flags) override {
-      llvm::Value *arrayEnd = CGF.Builder.CreateLoad(ArrayEndPointer);
+      llvm::Value *arrayEnd = CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, ArrayEndPointer);
       emitPartialArrayDestroy(CGF, ArrayBegin, arrayEnd,
                               ElementType, ElementAlign, Destroyer);
     }
@@ -2457,7 +2471,7 @@ void CodeGenFunction::EmitParmDecl(const VarDecl &D, ParamValue Arg,
     // This may be passed as an inalloca'ed value on Windows x86.
     if (BlockInfo) {
       llvm::Value *V = Arg.isIndirect()
-                           ? Builder.CreateLoad(Arg.getIndirectAddress())
+                           ? Builder.CreateLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, Arg.getIndirectAddress())
                            : Arg.getDirectValue();
       setBlockContextParameter(IPD, ArgNo, V);
       return;
@@ -2549,7 +2563,7 @@ void CodeGenFunction::EmitParmDecl(const VarDecl &D, ParamValue Arg,
 
       // Load objects passed indirectly.
       if (Arg.isIndirect() && !ArgVal)
-        ArgVal = Builder.CreateLoad(DeclPtr);
+        ArgVal = Builder.CreateLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, DeclPtr);
 
       if (lt == Qualifiers::OCL_Strong) {
         if (!isConsumed) {

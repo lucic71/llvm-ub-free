@@ -727,7 +727,7 @@ CGCallee ItaniumCXXABI::EmitLoadOfMemberFunctionPointer(
             CGF.Builder.CreateGEP(CGF.Int8Ty, VTable, VTableOffset);
         VFPAddr = CGF.Builder.CreateBitCast(
             VFPAddr, FTy->getPointerTo()->getPointerTo());
-        VirtualFn = CGF.Builder.CreateAlignedLoad(
+        VirtualFn = CGF.Builder.CreateAlignedLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, 
             FTy->getPointerTo(), VFPAddr, CGF.getPointerAlign(),
             "memptr.virtualfn");
       }
@@ -1230,7 +1230,7 @@ void ItaniumCXXABI::emitVirtualObjectDelete(CodeGenFunction &CGF,
     // Track back to entry -2 and pull out the offset there.
     llvm::Value *OffsetPtr = CGF.Builder.CreateConstInBoundsGEP1_64(
         CGF.IntPtrTy, VTable, -2, "complete-offset.ptr");
-    llvm::Value *Offset = CGF.Builder.CreateAlignedLoad(CGF.IntPtrTy, OffsetPtr,                                                        CGF.getPointerAlign());
+    llvm::Value *Offset = CGF.Builder.CreateAlignedLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, CGF.IntPtrTy, OffsetPtr,                                                        CGF.getPointerAlign());
 
     // Apply the offset.
     llvm::Value *CompletePtr =
@@ -1445,7 +1445,7 @@ llvm::Value *ItaniumCXXABI::EmitTypeid(CodeGenFunction &CGF,
     Value =
         CGF.Builder.CreateConstInBoundsGEP1_64(StdTypeInfoPtrTy, Value, -1ULL);
   }
-  return CGF.Builder.CreateAlignedLoad(StdTypeInfoPtrTy, Value,
+  return CGF.Builder.CreateAlignedLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, StdTypeInfoPtrTy, Value,
                                        CGF.getPointerAlign());
 }
 
@@ -1513,7 +1513,7 @@ llvm::Value *ItaniumCXXABI::EmitDynamicCastToVoid(CodeGenFunction &CGF,
     // Get the offset-to-top from the vtable.
     OffsetToTop =
         CGF.Builder.CreateConstInBoundsGEP1_32(CGM.Int32Ty, VTable, -2U);
-    OffsetToTop = CGF.Builder.CreateAlignedLoad(
+    OffsetToTop = CGF.Builder.CreateAlignedLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, 
         CGM.Int32Ty, OffsetToTop, CharUnits::fromQuantity(4), "offset.to.top");
   } else {
     llvm::Type *PtrDiffLTy =
@@ -1526,7 +1526,7 @@ llvm::Value *ItaniumCXXABI::EmitDynamicCastToVoid(CodeGenFunction &CGF,
     // Get the offset-to-top from the vtable.
     OffsetToTop =
         CGF.Builder.CreateConstInBoundsGEP1_64(PtrDiffLTy, VTable, -2ULL);
-    OffsetToTop = CGF.Builder.CreateAlignedLoad(
+    OffsetToTop = CGF.Builder.CreateAlignedLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, 
         PtrDiffLTy, OffsetToTop, CGF.getPointerAlign(), "offset.to.top");
   }
   // Finally, add the offset to the pointer.
@@ -1562,13 +1562,13 @@ ItaniumCXXABI::GetVirtualBaseClassOffset(CodeGenFunction &CGF,
   if (CGM.getItaniumVTableContext().isRelativeLayout()) {
     VBaseOffsetPtr =
         CGF.Builder.CreateBitCast(VBaseOffsetPtr, CGF.Int32Ty->getPointerTo());
-    VBaseOffset = CGF.Builder.CreateAlignedLoad(
+    VBaseOffset = CGF.Builder.CreateAlignedLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, 
         CGF.Int32Ty, VBaseOffsetPtr, CharUnits::fromQuantity(4),
         "vbase.offset");
   } else {
     VBaseOffsetPtr = CGF.Builder.CreateBitCast(VBaseOffsetPtr,
                                                CGM.PtrDiffTy->getPointerTo());
-    VBaseOffset = CGF.Builder.CreateAlignedLoad(
+    VBaseOffset = CGF.Builder.CreateAlignedLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, 
         CGM.PtrDiffTy, VBaseOffsetPtr, CGF.getPointerAlign(), "vbase.offset");
   }
   return VBaseOffset;
@@ -1656,7 +1656,7 @@ void ItaniumCXXABI::EmitInstanceFunctionProlog(CodeGenFunction &CGF) {
 
   /// Initialize the 'vtt' slot if needed.
   if (getStructorImplicitParamDecl(CGF)) {
-    getStructorImplicitParamValue(CGF) = CGF.Builder.CreateLoad(
+    getStructorImplicitParamValue(CGF) = CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, 
         CGF.GetAddrOfLocalVar(getStructorImplicitParamDecl(CGF)), "vtt");
   }
 
@@ -1669,7 +1669,7 @@ void ItaniumCXXABI::EmitInstanceFunctionProlog(CodeGenFunction &CGF) {
   /// 2) in theory, an ABI could implement 'this' returns some other way;
   ///    HasThisReturn only specifies a contract, not the implementation
   if (HasThisReturn(CGF.CurGD))
-    CGF.Builder.CreateStore(getThisValue(CGF), CGF.ReturnValue);
+    CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, getThisValue(CGF), CGF.ReturnValue);
 }
 
 CGCXXABI::AddedStructorArgs ItaniumCXXABI::getImplicitConstructorArgs(
@@ -1854,7 +1854,7 @@ llvm::Value *ItaniumCXXABI::getVTableAddressPointInStructorWithVTT(
         CGF.VoidPtrTy, VTT, VirtualPointerIndex);
 
   // And load the address point from the VTT.
-  return CGF.Builder.CreateAlignedLoad(CGF.VoidPtrTy, VTT,
+  return CGF.Builder.CreateAlignedLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, CGF.VoidPtrTy, VTT,
                                        CGF.getPointerAlign());
 }
 
@@ -1949,7 +1949,7 @@ CGCallee ItaniumCXXABI::getVirtualFunctionPointer(CodeGenFunction &CGF,
       llvm::Value *VTableSlotPtr = CGF.Builder.CreateConstInBoundsGEP1_64(
           TyPtr, VTable, VTableIndex, "vfn");
       VFuncLoad =
-          CGF.Builder.CreateAlignedLoad(TyPtr, VTableSlotPtr,
+          CGF.Builder.CreateAlignedLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, TyPtr, VTableSlotPtr,
                                         CGF.getPointerAlign());
     }
 
@@ -2085,7 +2085,7 @@ static llvm::Value *performTypeAdjustment(CodeGenFunction &CGF,
   llvm::Value *ResultPtr;
   if (VirtualAdjustment) {
     Address VTablePtrPtr = CGF.Builder.CreateElementBitCast(V, CGF.Int8PtrTy);
-    llvm::Value *VTablePtr = CGF.Builder.CreateLoad(VTablePtrPtr);
+    llvm::Value *VTablePtr = CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, VTablePtrPtr);
 
     llvm::Value *Offset;
     llvm::Value *OffsetPtr = CGF.Builder.CreateConstInBoundsGEP1_64(
@@ -2095,7 +2095,7 @@ static llvm::Value *performTypeAdjustment(CodeGenFunction &CGF,
       OffsetPtr =
           CGF.Builder.CreateBitCast(OffsetPtr, CGF.Int32Ty->getPointerTo());
       Offset =
-          CGF.Builder.CreateAlignedLoad(CGF.Int32Ty, OffsetPtr,
+          CGF.Builder.CreateAlignedLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, CGF.Int32Ty, OffsetPtr,
                                         CharUnits::fromQuantity(4));
     } else {
       llvm::Type *PtrDiffTy =
@@ -2105,7 +2105,7 @@ static llvm::Value *performTypeAdjustment(CodeGenFunction &CGF,
           CGF.Builder.CreateBitCast(OffsetPtr, PtrDiffTy->getPointerTo());
 
       // Load the adjustment offset from the vtable.
-      Offset = CGF.Builder.CreateAlignedLoad(PtrDiffTy, OffsetPtr,
+      Offset = CGF.Builder.CreateAlignedLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, PtrDiffTy, OffsetPtr,
                                              CGF.getPointerAlign());
     }
     // Adjust our pointer.
@@ -2188,7 +2188,7 @@ Address ItaniumCXXABI::InitializeArrayCookie(CodeGenFunction &CGF,
   // Write the number of elements into the appropriate slot.
   Address NumElementsPtr =
       CGF.Builder.CreateElementBitCast(CookiePtr, CGF.SizeTy);
-  llvm::Instruction *SI = CGF.Builder.CreateStore(NumElements, NumElementsPtr);
+  llvm::Instruction *SI = CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, NumElements, NumElementsPtr);
 
   // Handle the array cookie specially in ASan.
   if (CGM.getLangOpts().Sanitize.has(SanitizerKind::Address) && AS == 0 &&
@@ -2221,7 +2221,7 @@ llvm::Value *ItaniumCXXABI::readArrayCookieImpl(CodeGenFunction &CGF,
   unsigned AS = allocPtr.getAddressSpace();
   numElementsPtr = CGF.Builder.CreateElementBitCast(numElementsPtr, CGF.SizeTy);
   if (!CGM.getLangOpts().Sanitize.has(SanitizerKind::Address) || AS != 0)
-    return CGF.Builder.CreateLoad(numElementsPtr);
+    return CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, numElementsPtr);
   // In asan mode emit a function call instead of a regular load and let the
   // run-time deal with it: if the shadow is properly poisoned return the
   // cookie, otherwise return 0 to avoid an infinite loop calling DTORs.
@@ -2261,11 +2261,11 @@ Address ARMCXXABI::InitializeArrayCookie(CodeGenFunction &CGF,
   cookie = CGF.Builder.CreateElementBitCast(cookie, CGF.SizeTy);
   llvm::Value *elementSize = llvm::ConstantInt::get(CGF.SizeTy,
                  getContext().getTypeSizeInChars(elementType).getQuantity());
-  CGF.Builder.CreateStore(elementSize, cookie);
+  CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, elementSize, cookie);
 
   // The second element is the element count.
   cookie = CGF.Builder.CreateConstInBoundsGEP(cookie, 1);
-  CGF.Builder.CreateStore(numElements, cookie);
+  CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, numElements, cookie);
 
   // Finally, compute a pointer to the actual data buffer by skipping
   // over the cookie completely.
@@ -2282,7 +2282,7 @@ llvm::Value *ARMCXXABI::readArrayCookieImpl(CodeGenFunction &CGF,
     = CGF.Builder.CreateConstInBoundsByteGEP(allocPtr, CGF.getSizeSize());
 
   numElementsPtr = CGF.Builder.CreateElementBitCast(numElementsPtr, CGF.SizeTy);
-  return CGF.Builder.CreateLoad(numElementsPtr);
+  return CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, numElementsPtr);
 }
 
 /*********************** Static local initialization **************************/
@@ -2440,7 +2440,7 @@ void ItaniumCXXABI::EmitGuardedInit(CodeGenFunction &CGF,
 
   // Load the first byte of the guard variable.
   llvm::LoadInst *LI =
-      Builder.CreateLoad(Builder.CreateElementBitCast(guardAddr, CGM.Int8Ty));
+      Builder.CreateLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, Builder.CreateElementBitCast(guardAddr, CGM.Int8Ty));
 
   // Itanium ABI:
   //   An implementation supporting thread-safety on multiprocessor
@@ -2516,7 +2516,7 @@ void ItaniumCXXABI::EmitGuardedInit(CodeGenFunction &CGF,
   } else {
     // Store 1 into the first byte of the guard variable after initialization is
     // complete.
-    Builder.CreateStore(llvm::ConstantInt::get(CGM.Int8Ty, 1),
+    Builder.CreateStore(!CGM.getCodeGenOpts().UseDefaultAlignment, llvm::ConstantInt::get(CGM.Int8Ty, 1),
                         Builder.CreateElementBitCast(guardAddr, CGM.Int8Ty));
   }
 
@@ -2991,7 +2991,7 @@ void ItaniumCXXABI::EmitThreadLocalInitFuncs(
     llvm::Value *Val = Var;
     if (VD->getType()->isReferenceType()) {
       CharUnits Align = CGM.getContext().getDeclAlign(VD);
-      Val = Builder.CreateAlignedLoad(Var->getValueType(), Var, Align);
+      Val = Builder.CreateAlignedLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, Var->getValueType(), Var, Align);
     }
     if (Val->getType() != Wrapper->getReturnType())
       Val = Builder.CreatePointerBitCastOrAddrSpaceCast(
@@ -4486,7 +4486,7 @@ static void InitCatchParam(CodeGenFunction &CGF,
         Address ExnPtrTmp =
           CGF.CreateTempAlloca(PtrTy, CGF.getPointerAlign(), "exn.byref.tmp");
         llvm::Value *Casted = CGF.Builder.CreateBitCast(AdjustedExn, PtrTy);
-        CGF.Builder.CreateStore(Casted, ExnPtrTmp);
+        CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, Casted, ExnPtrTmp);
 
         // Bind the reference to the temporary.
         AdjustedExn = ExnPtrTmp.getPointer();
@@ -4495,7 +4495,7 @@ static void InitCatchParam(CodeGenFunction &CGF,
 
     llvm::Value *ExnCast =
       CGF.Builder.CreateBitCast(AdjustedExn, LLVMCatchTy, "exn.byref");
-    CGF.Builder.CreateStore(ExnCast, ParamAddr);
+    CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, ExnCast, ParamAddr);
     return;
   }
 
@@ -4518,7 +4518,7 @@ static void InitCatchParam(CodeGenFunction &CGF,
       case Qualifiers::OCL_None:
       case Qualifiers::OCL_ExplicitNone:
       case Qualifiers::OCL_Autoreleasing:
-        CGF.Builder.CreateStore(CastExn, ParamAddr);
+        CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, CastExn, ParamAddr);
         return;
 
       case Qualifiers::OCL_Weak:

@@ -1168,7 +1168,7 @@ void CodeGenFunction::EmitOMPLastprivateClauseFinal(
         Address PrivateAddr = GetAddrOfLocalVar(PrivateVD);
         if (const auto *RefTy = PrivateVD->getType()->getAs<ReferenceType>())
           PrivateAddr = Address(
-              Builder.CreateLoad(PrivateAddr),
+              Builder.CreateLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, PrivateAddr),
               CGM.getTypes().ConvertTypeForMem(RefTy->getPointeeType()),
               CGM.getNaturalTypeAlignment(RefTy->getPointeeType()));
         // Store the last value to the private copy in the last iteration.
@@ -2039,7 +2039,7 @@ void CodeGenFunction::EmitOMPCanonicalLoop(const OMPCanonicalLoop *S) {
                            .getNonReferenceType();
   Address CountAddr = CreateMemTemp(LogicalTy, ".count.addr");
   emitCapturedStmtCall(*this, DistanceClosure, {CountAddr.getPointer()});
-  llvm::Value *DistVal = Builder.CreateLoad(CountAddr, ".count");
+  llvm::Value *DistVal = Builder.CreateLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, CountAddr, ".count");
 
   // Emit the loop structure.
   llvm::OpenMPIRBuilder &OMPBuilder = CGM.getOpenMPRuntime().getOMPBuilder();
@@ -3096,14 +3096,14 @@ static void emitDistributeParallelForDistributeInnerBoundParams(
   LValue LB =
       CGF.EmitLValue(cast<DeclRefExpr>(Dir.getCombinedLowerBoundVariable()));
   llvm::Value *LBCast =
-      CGF.Builder.CreateIntCast(CGF.Builder.CreateLoad(LB.getAddress(CGF)),
+      CGF.Builder.CreateIntCast(CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, LB.getAddress(CGF)),
                                 CGF.SizeTy, /*isSigned=*/false);
   CapturedVars.push_back(LBCast);
   LValue UB =
       CGF.EmitLValue(cast<DeclRefExpr>(Dir.getCombinedUpperBoundVariable()));
 
   llvm::Value *UBCast =
-      CGF.Builder.CreateIntCast(CGF.Builder.CreateLoad(UB.getAddress(CGF)),
+      CGF.Builder.CreateIntCast(CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, UB.getAddress(CGF)),
                                 CGF.SizeTy, /*isSigned=*/false);
   CapturedVars.push_back(UBCast);
 }
@@ -4688,9 +4688,9 @@ void CodeGenFunction::EmitOMPTaskBasedDirective(
     if (!Data.PrivateVars.empty() || !Data.FirstprivateVars.empty() ||
         !Data.LastprivateVars.empty() || !Data.PrivateLocals.empty()) {
       enum { PrivatesParam = 2, CopyFnParam = 3 };
-      llvm::Value *CopyFn = CGF.Builder.CreateLoad(
+      llvm::Value *CopyFn = CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, 
           CGF.GetAddrOfLocalVar(CS->getCapturedDecl()->getParam(CopyFnParam)));
-      llvm::Value *PrivatesPtr = CGF.Builder.CreateLoad(CGF.GetAddrOfLocalVar(
+      llvm::Value *PrivatesPtr = CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, CGF.GetAddrOfLocalVar(
           CS->getCapturedDecl()->getParam(PrivatesParam)));
       // Map privates.
       llvm::SmallVector<std::pair<const VarDecl *, Address>, 16> PrivatePtrs;
@@ -4759,7 +4759,7 @@ void CodeGenFunction::EmitOMPTaskBasedDirective(
       }
       for (const auto &Pair : PrivatePtrs) {
         Address Replacement = Address(
-            CGF.Builder.CreateLoad(Pair.second),
+            CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, Pair.second),
             CGF.ConvertTypeForMem(Pair.first->getType().getNonReferenceType()),
             CGF.getContext().getDeclAlign(Pair.first));
         Scope.addPrivate(Pair.first, Replacement);
@@ -4774,18 +4774,18 @@ void CodeGenFunction::EmitOMPTaskBasedDirective(
       for (auto &Pair : UntiedLocalVars) {
         QualType VDType = Pair.first->getType().getNonReferenceType();
         if (isAllocatableDecl(Pair.first)) {
-          llvm::Value *Ptr = CGF.Builder.CreateLoad(Pair.second.first);
+          llvm::Value *Ptr = CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, Pair.second.first);
           Address Replacement(
               Ptr,
               CGF.ConvertTypeForMem(CGF.getContext().getPointerType(VDType)),
               CGF.getPointerAlign());
           Pair.second.first = Replacement;
-          Ptr = CGF.Builder.CreateLoad(Replacement);
+          Ptr = CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, Replacement);
           Replacement = Address(Ptr, CGF.ConvertTypeForMem(VDType),
                                 CGF.getContext().getDeclAlign(Pair.first));
           Pair.second.second = Replacement;
         } else {
-          llvm::Value *Ptr = CGF.Builder.CreateLoad(Pair.second.first);
+          llvm::Value *Ptr = CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, Pair.second.first);
           Address Replacement(Ptr, CGF.ConvertTypeForMem(VDType),
                               CGF.getContext().getDeclAlign(Pair.first));
           Pair.second.first = Replacement;
@@ -4796,7 +4796,7 @@ void CodeGenFunction::EmitOMPTaskBasedDirective(
       OMPPrivateScope FirstprivateScope(CGF);
       for (const auto &Pair : FirstprivatePtrs) {
         Address Replacement(
-            CGF.Builder.CreateLoad(Pair.second),
+            CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, Pair.second),
             CGF.ConvertTypeForMem(Pair.first->getType().getNonReferenceType()),
             CGF.getContext().getDeclAlign(Pair.first));
         FirstprivateScope.addPrivate(Pair.first, Replacement);
@@ -4805,7 +4805,7 @@ void CodeGenFunction::EmitOMPTaskBasedDirective(
       OMPLexicalScope LexScope(CGF, S, CapturedRegion);
       ReductionCodeGen RedCG(Data.ReductionVars, Data.ReductionVars,
                              Data.ReductionCopies, Data.ReductionOps);
-      llvm::Value *ReductionsPtr = CGF.Builder.CreateLoad(
+      llvm::Value *ReductionsPtr = CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, 
           CGF.GetAddrOfLocalVar(CS->getCapturedDecl()->getParam(9)));
       for (unsigned Cnt = 0, E = Data.ReductionVars.size(); Cnt < E; ++Cnt) {
         RedCG.emitSharedOrigLValue(CGF, Cnt);
@@ -5008,9 +5008,9 @@ void CodeGenFunction::EmitOMPTargetTaskBasedDirective(
     OMPPrivateScope Scope(CGF);
     if (!Data.FirstprivateVars.empty()) {
       enum { PrivatesParam = 2, CopyFnParam = 3 };
-      llvm::Value *CopyFn = CGF.Builder.CreateLoad(
+      llvm::Value *CopyFn = CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, 
           CGF.GetAddrOfLocalVar(CS->getCapturedDecl()->getParam(CopyFnParam)));
-      llvm::Value *PrivatesPtr = CGF.Builder.CreateLoad(CGF.GetAddrOfLocalVar(
+      llvm::Value *PrivatesPtr = CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, CGF.GetAddrOfLocalVar(
           CS->getCapturedDecl()->getParam(PrivatesParam)));
       // Map privates.
       llvm::SmallVector<std::pair<const VarDecl *, Address>, 16> PrivatePtrs;
@@ -5035,7 +5035,7 @@ void CodeGenFunction::EmitOMPTargetTaskBasedDirective(
           CGF, S.getBeginLoc(), {CopyFnTy, CopyFn}, CallArgs);
       for (const auto &Pair : PrivatePtrs) {
         Address Replacement(
-            CGF.Builder.CreateLoad(Pair.second),
+            CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, Pair.second),
             CGF.ConvertTypeForMem(Pair.first->getType().getNonReferenceType()),
             CGF.getContext().getDeclAlign(Pair.first));
         Scope.addPrivate(Pair.first, Replacement);
@@ -5080,7 +5080,7 @@ void CodeGenFunction::processInReduction(const OMPExecutableDirective &S,
     OMPLexicalScope LexScope(CGF, S, CapturedRegion);
     ReductionCodeGen RedCG(Data.ReductionVars, Data.ReductionVars,
                            Data.ReductionCopies, Data.ReductionOps);
-    llvm::Value *ReductionsPtr = CGF.Builder.CreateLoad(
+    llvm::Value *ReductionsPtr = CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, 
         CGF.GetAddrOfLocalVar(CS->getCapturedDecl()->getParam(4)));
     for (unsigned Cnt = 0, E = Data.ReductionVars.size(); Cnt < E; ++Cnt) {
       RedCG.emitSharedOrigLValue(CGF, Cnt);

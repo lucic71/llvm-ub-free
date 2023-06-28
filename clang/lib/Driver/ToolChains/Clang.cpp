@@ -5118,6 +5118,17 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   else
     CmdArgs.push_back("-fno-constrain-bool-value");
 
+  if (!Args.hasFlag(options::OPT_fdrop_inbounds_from_gep,
+                   options::OPT_fno_drop_inbounds_from_gep, false))
+    CmdArgs.push_back("-fno-drop-inbounds-from-gep");
+
+  if (!Args.hasFlag(options::OPT_fcheck_div_rem_overflow,
+                   options::OPT_fno_check_div_rem_overflow, false))
+    CmdArgs.push_back("-fno-check-div-rem-overflow");
+
+  if (!Args.hasFlag(options::OPT_fuse_default_alignment,
+                   options::OPT_fno_use_default_alignment, true))
+    CmdArgs.push_back("-fno-use-default-alignment");
   // LLVM Code Generator Options.
 
   for (const Arg *A : Args.filtered(options::OPT_frewrite_map_file_EQ)) {

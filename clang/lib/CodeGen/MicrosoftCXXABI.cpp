@@ -1239,7 +1239,7 @@ void MicrosoftCXXABI::initializeHiddenVirtualInheritanceMembers(
     VtorDispPtr = Builder.CreateBitCast(
         VtorDispPtr, CGF.Int32Ty->getPointerTo(AS), "vtordisp.ptr");
 
-    Builder.CreateAlignedStore(VtorDispValue, VtorDispPtr,
+    Builder.CreateAlignedStore(!CGM.getCodeGenOpts().UseDefaultAlignment, VtorDispValue, VtorDispPtr,
                                CharUnits::fromQuantity(4));
   }
 }
@@ -1293,7 +1293,7 @@ void MicrosoftCXXABI::EmitVBPtrStores(CodeGenFunction &CGF,
         CGF.Builder.CreateConstInBoundsGEP2_32(GV->getValueType(), GV, 0, 0);
     VBPtr = CGF.Builder.CreateElementBitCast(VBPtr, GVPtr->getType(),
                                       "vbptr." + VBT->ObjectWithVPtr->getName());
-    CGF.Builder.CreateStore(GVPtr, VBPtr);
+    CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, GVPtr, VBPtr);
   }
 }
 
@@ -1565,16 +1565,16 @@ void MicrosoftCXXABI::EmitInstanceFunctionProlog(CodeGenFunction &CGF) {
   // 2) in theory, an ABI could implement 'this' returns some other way;
   //    HasThisReturn only specifies a contract, not the implementation
   if (HasThisReturn(CGF.CurGD))
-    CGF.Builder.CreateStore(getThisValue(CGF), CGF.ReturnValue);
+    CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, getThisValue(CGF), CGF.ReturnValue);
   else if (hasMostDerivedReturn(CGF.CurGD))
-    CGF.Builder.CreateStore(CGF.EmitCastToVoidPtr(getThisValue(CGF)),
+    CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, CGF.EmitCastToVoidPtr(getThisValue(CGF)),
                             CGF.ReturnValue);
 
   if (isa<CXXConstructorDecl>(MD) && MD->getParent()->getNumVBases()) {
     assert(getStructorImplicitParamDecl(CGF) &&
            "no implicit parameter for a constructor with virtual bases?");
     getStructorImplicitParamValue(CGF)
-      = CGF.Builder.CreateLoad(
+      = CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, 
           CGF.GetAddrOfLocalVar(getStructorImplicitParamDecl(CGF)),
           "is_most_derived");
   }
@@ -1583,7 +1583,7 @@ void MicrosoftCXXABI::EmitInstanceFunctionProlog(CodeGenFunction &CGF) {
     assert(getStructorImplicitParamDecl(CGF) &&
            "no implicit parameter for a deleting destructor?");
     getStructorImplicitParamValue(CGF)
-      = CGF.Builder.CreateLoad(
+      = CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, 
           CGF.GetAddrOfLocalVar(getStructorImplicitParamDecl(CGF)),
           "should_call_delete");
   }
@@ -1959,7 +1959,7 @@ CGCallee MicrosoftCXXABI::getVirtualFunctionPointer(CodeGenFunction &CGF,
 
     llvm::Value *VFuncPtr =
         Builder.CreateConstInBoundsGEP1_64(Ty, VTable, ML.Index, "vfn");
-    VFunc = Builder.CreateAlignedLoad(Ty, VFuncPtr, CGF.getPointerAlign());
+    VFunc = Builder.CreateAlignedLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, Ty, VFuncPtr, CGF.getPointerAlign());
   }
 
   CGCallee Callee(GD, VFunc);
@@ -2094,7 +2094,7 @@ MicrosoftCXXABI::EmitVirtualMemPtrThunk(const CXXMethodDecl *MD,
   llvm::Value *VFuncPtr = CGF.Builder.CreateConstInBoundsGEP1_64(
       ThunkPtrTy, VTable, ML.Index, "vfn");
   llvm::Value *Callee =
-    CGF.Builder.CreateAlignedLoad(ThunkPtrTy, VFuncPtr, CGF.getPointerAlign());
+    CGF.Builder.CreateAlignedLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, ThunkPtrTy, VFuncPtr, CGF.getPointerAlign());
 
   CGF.EmitMustTailThunk(MD, getThisValue(CGF), {ThunkTy, Callee});
 
@@ -2207,7 +2207,7 @@ llvm::Value *MicrosoftCXXABI::performThisAdjustment(CodeGenFunction &CGF,
         CGF.Builder.CreateConstInBoundsByteGEP(This,
                  CharUnits::fromQuantity(TA.Virtual.Microsoft.VtordispOffset));
     VtorDispPtr = CGF.Builder.CreateElementBitCast(VtorDispPtr, CGF.Int32Ty);
-    llvm::Value *VtorDisp = CGF.Builder.CreateLoad(VtorDispPtr, "vtordisp");
+    llvm::Value *VtorDisp = CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, VtorDispPtr, "vtordisp");
     V = CGF.Builder.CreateGEP(This.getElementType(), This.getPointer(),
                               CGF.Builder.CreateNeg(VtorDisp));
 
@@ -2294,7 +2294,7 @@ llvm::Value *MicrosoftCXXABI::readArrayCookieImpl(CodeGenFunction &CGF,
                                                   CharUnits cookieSize) {
   Address numElementsPtr =
     CGF.Builder.CreateElementBitCast(allocPtr, CGF.SizeTy);
-  return CGF.Builder.CreateLoad(numElementsPtr);
+  return CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, numElementsPtr);
 }
 
 Address MicrosoftCXXABI::InitializeArrayCookie(CodeGenFunction &CGF,
@@ -2313,7 +2313,7 @@ Address MicrosoftCXXABI::InitializeArrayCookie(CodeGenFunction &CGF,
   // Write the number of elements into the appropriate slot.
   Address numElementsPtr
     = CGF.Builder.CreateElementBitCast(cookiePtr, CGF.SizeTy);
-  CGF.Builder.CreateStore(numElements, numElementsPtr);
+  CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, numElements, numElementsPtr);
 
   // Finally, compute a pointer to the actual data buffer by skipping
   // over the cookie completely.
@@ -2437,7 +2437,7 @@ static void emitTlsGuardCheck(CodeGenFunction &CGF, llvm::GlobalValue *TlsGuard,
                               llvm::BasicBlock *DynInitBB,
                               llvm::BasicBlock *ContinueBB) {
   llvm::LoadInst *TlsGuardValue =
-      CGF.Builder.CreateLoad(Address(TlsGuard, CGF.Int8Ty, CharUnits::One()));
+      CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, Address(TlsGuard, CGF.Int8Ty, CharUnits::One()));
   llvm::Value *CmpResult =
       CGF.Builder.CreateICmpEQ(TlsGuardValue, CGF.Builder.getInt8(0));
   CGF.Builder.CreateCondBr(CmpResult, DynInitBB, ContinueBB);
@@ -2558,10 +2558,10 @@ struct ResetGuardBit final : EHScopeStack::Cleanup {
     // Reset the bit in the mask so that the static variable may be
     // reinitialized.
     CGBuilderTy &Builder = CGF.Builder;
-    llvm::LoadInst *LI = Builder.CreateLoad(Guard);
+    llvm::LoadInst *LI = Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, Guard);
     llvm::ConstantInt *Mask =
         llvm::ConstantInt::get(CGF.IntTy, ~(1ULL << GuardNum));
-    Builder.CreateStore(Builder.CreateAnd(LI, Mask), Guard);
+    Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, Builder.CreateAnd(LI, Mask), Guard);
   }
 };
 
@@ -2674,7 +2674,7 @@ void MicrosoftCXXABI::EmitGuardedInit(CodeGenFunction &CGF, const VarDecl &D,
 
     // Test our bit from the guard variable.
     llvm::ConstantInt *Bit = llvm::ConstantInt::get(GuardTy, 1ULL << GuardNum);
-    llvm::LoadInst *LI = Builder.CreateLoad(GuardAddr);
+    llvm::LoadInst *LI = Builder.CreateLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, GuardAddr);
     llvm::Value *NeedsInit =
         Builder.CreateICmpEQ(Builder.CreateAnd(LI, Bit), Zero);
     llvm::BasicBlock *InitBlock = CGF.createBasicBlock("init");
@@ -2685,7 +2685,7 @@ void MicrosoftCXXABI::EmitGuardedInit(CodeGenFunction &CGF, const VarDecl &D,
     // Set our bit in the guard variable and emit the initializer and add a global
     // destructor if appropriate.
     CGF.EmitBlock(InitBlock);
-    Builder.CreateStore(Builder.CreateOr(LI, Bit), GuardAddr);
+    Builder.CreateStore(!CGM.getCodeGenOpts().UseDefaultAlignment, Builder.CreateOr(LI, Bit), GuardAddr);
     CGF.EHStack.pushCleanup<ResetGuardBit>(EHCleanup, GuardAddr, GuardNum);
     CGF.EmitCXXGlobalVarDeclInit(D, GV, PerformInit);
     CGF.PopCleanupBlock();
@@ -2707,10 +2707,10 @@ void MicrosoftCXXABI::EmitGuardedInit(CodeGenFunction &CGF, const VarDecl &D,
     // found in N2325.
 
     // This BasicBLock determines whether or not we have any work to do.
-    llvm::LoadInst *FirstGuardLoad = Builder.CreateLoad(GuardAddr);
+    llvm::LoadInst *FirstGuardLoad = Builder.CreateLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, GuardAddr);
     FirstGuardLoad->setOrdering(llvm::AtomicOrdering::Unordered);
     llvm::LoadInst *InitThreadEpoch =
-        Builder.CreateLoad(getInitThreadEpochPtr(CGM));
+        Builder.CreateLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, getInitThreadEpochPtr(CGM));
     llvm::Value *IsUninitialized =
         Builder.CreateICmpSGT(FirstGuardLoad, InitThreadEpoch);
     llvm::BasicBlock *AttemptInitBlock = CGF.createBasicBlock("init.attempt");
@@ -2723,7 +2723,7 @@ void MicrosoftCXXABI::EmitGuardedInit(CodeGenFunction &CGF, const VarDecl &D,
     CGF.EmitBlock(AttemptInitBlock);
     CGF.EmitNounwindRuntimeCall(getInitThreadHeaderFn(CGM),
                                 GuardAddr.getPointer());
-    llvm::LoadInst *SecondGuardLoad = Builder.CreateLoad(GuardAddr);
+    llvm::LoadInst *SecondGuardLoad = Builder.CreateLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, GuardAddr);
     SecondGuardLoad->setOrdering(llvm::AtomicOrdering::Unordered);
     llvm::Value *ShouldDoInit =
         Builder.CreateICmpEQ(SecondGuardLoad, getAllOnesInt());
@@ -3123,7 +3123,7 @@ MicrosoftCXXABI::GetVBaseOffsetFromVBPtr(CodeGenFunction &CGF,
     VBPtrAlign = CGF.getPointerAlign();
   }
 
-  llvm::Value *VBTable = Builder.CreateAlignedLoad(
+  llvm::Value *VBTable = Builder.CreateAlignedLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, 
       CGM.Int32Ty->getPointerTo(0), VBPtr, VBPtrAlign, "vbtable");
 
   // Translate from byte offset to table index. It improves analyzability.
@@ -3135,7 +3135,7 @@ MicrosoftCXXABI::GetVBaseOffsetFromVBPtr(CodeGenFunction &CGF,
   llvm::Value *VBaseOffs =
       Builder.CreateInBoundsGEP(CGM.Int32Ty, VBTable, VBTableIndex);
   VBaseOffs = Builder.CreateBitCast(VBaseOffs, CGM.Int32Ty->getPointerTo(0));
-  return Builder.CreateAlignedLoad(CGM.Int32Ty, VBaseOffs,
+  return Builder.CreateAlignedLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, CGM.Int32Ty, VBaseOffs,
                                    CharUnits::fromQuantity(4), "vbase_offs");
 }
 
@@ -3399,7 +3399,7 @@ llvm::Value *MicrosoftCXXABI::EmitNonNullMemberPointerConversion(
             Mapping->getAggregateElement(cast<llvm::Constant>(VBIndex));
       } else {
         llvm::Value *Idxs[] = {getZeroInt(), VBIndex};
-        VirtualBaseAdjustmentOffset = Builder.CreateAlignedLoad(
+        VirtualBaseAdjustmentOffset = Builder.CreateAlignedLoad(!CGM.getCodeGenOpts().UseDefaultAlignment, 
             CGM.IntTy, Builder.CreateInBoundsGEP(VDispMap->getValueType(),
                                                  VDispMap, Idxs),
             CharUnits::fromQuantity(4));
@@ -4119,7 +4119,7 @@ MicrosoftCXXABI::getAddrOfCXXCtorClosure(const CXXConstructorDecl *CD,
   llvm::Value *This = getThisValue(CGF);
 
   llvm::Value *SrcVal =
-      IsCopy ? CGF.Builder.CreateLoad(CGF.GetAddrOfLocalVar(&SrcParam), "src")
+      IsCopy ? CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, CGF.GetAddrOfLocalVar(&SrcParam), "src")
              : nullptr;
 
   CallArgList Args;

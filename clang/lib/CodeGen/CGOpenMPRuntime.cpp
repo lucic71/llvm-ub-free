@@ -946,7 +946,7 @@ static Address castToBase(CodeGenFunction &CGF, QualType BaseTy, QualType ElTy,
          !CGF.getContext().hasSameType(BaseTy, ElTy)) {
     Tmp = CGF.CreateMemTemp(BaseTy);
     if (TopTmp.isValid())
-      CGF.Builder.CreateStore(Tmp.getPointer(), TopTmp);
+      CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, Tmp.getPointer(), TopTmp);
     else
       MostTopTmp = Tmp;
     TopTmp = Tmp;
@@ -956,7 +956,7 @@ static Address castToBase(CodeGenFunction &CGF, QualType BaseTy, QualType ElTy,
   if (Tmp.isValid()) {
     Addr = CGF.Builder.CreatePointerBitCastOrAddrSpaceCast(
         Addr, Tmp.getElementType());
-    CGF.Builder.CreateStore(Addr, Tmp);
+    CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, Addr, Tmp);
     return MostTopTmp;
   }
 
@@ -1755,7 +1755,7 @@ llvm::Function *CGOpenMPRuntime::emitThreadPrivateVarDefinition(
       ArgVal = CtorCGF.EmitLoadOfScalar(
           CtorCGF.GetAddrOfLocalVar(&Dst), /*Volatile=*/false,
           CGM.getContext().VoidPtrTy, Dst.getLocation());
-      CtorCGF.Builder.CreateStore(ArgVal, CtorCGF.ReturnValue);
+      CtorCGF.Builder.CreateStore(!CtorCGF.CGM.getCodeGenOpts().UseDefaultAlignment, ArgVal, CtorCGF.ReturnValue);
       CtorCGF.FinishFunction();
       Ctor = Fn;
     }
@@ -2077,7 +2077,7 @@ void CGOpenMPRuntime::emitParallelCall(CodeGenFunction &CGF, SourceLocation Loc,
     Address ZeroAddrBound =
         CGF.CreateDefaultAlignTempAlloca(CGF.Int32Ty,
                                          /*Name=*/".bound.zero.addr");
-    CGF.Builder.CreateStore(CGF.Builder.getInt32(/*C*/ 0), ZeroAddrBound);
+    CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, CGF.Builder.getInt32(/*C*/ 0), ZeroAddrBound);
     llvm::SmallVector<llvm::Value *, 16> OutlinedFnArgs;
     // ThreadId for serialized parallels is 0.
     OutlinedFnArgs.push_back(ThreadIDAddr.getPointer());
@@ -2324,7 +2324,7 @@ static Address emitAddrOfVarFromArray(CodeGenFunction &CGF, Address Array,
                                       unsigned Index, const VarDecl *Var) {
   // Pull out the pointer to the variable.
   Address PtrAddr = CGF.Builder.CreateConstArrayGEP(Array, Index);
-  llvm::Value *Ptr = CGF.Builder.CreateLoad(PtrAddr);
+  llvm::Value *Ptr = CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, PtrAddr);
 
   llvm::Type *ElemTy = CGF.ConvertTypeForMem(Var->getType());
   return Address(
@@ -2361,11 +2361,11 @@ static llvm::Value *emitCopyprivateCopyFunction(
   // Dest = (void*[n])(LHSArg);
   // Src = (void*[n])(RHSArg);
   Address LHS(CGF.Builder.CreatePointerBitCastOrAddrSpaceCast(
-                  CGF.Builder.CreateLoad(CGF.GetAddrOfLocalVar(&LHSArg)),
+                  CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, CGF.GetAddrOfLocalVar(&LHSArg)),
                   ArgsElemType->getPointerTo()),
               ArgsElemType, CGF.getPointerAlign());
   Address RHS(CGF.Builder.CreatePointerBitCastOrAddrSpaceCast(
-                  CGF.Builder.CreateLoad(CGF.GetAddrOfLocalVar(&RHSArg)),
+                  CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, CGF.GetAddrOfLocalVar(&RHSArg)),
                   ArgsElemType->getPointerTo()),
               ArgsElemType, CGF.getPointerAlign());
   // *(Type0*)Dst[0] = *(Type0*)Src[0];
@@ -2417,7 +2417,7 @@ void CGOpenMPRuntime::emitSingleRegion(CodeGenFunction &CGF,
     QualType KmpInt32Ty =
         C.getIntTypeForBitwidth(/*DestWidth=*/32, /*Signed=*/1);
     DidIt = CGF.CreateMemTemp(KmpInt32Ty, ".omp.copyprivate.did_it");
-    CGF.Builder.CreateStore(CGF.Builder.getInt32(0), DidIt);
+    CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, CGF.Builder.getInt32(0), DidIt);
   }
   // Prepare arguments and build a call to __kmpc_single
   llvm::Value *Args[] = {emitUpdateLocation(CGF, Loc), getThreadID(CGF, Loc)};
@@ -2432,7 +2432,7 @@ void CGOpenMPRuntime::emitSingleRegion(CodeGenFunction &CGF,
   emitInlinedDirective(CGF, OMPD_single, SingleOpGen);
   if (DidIt.isValid()) {
     // did_it = 1;
-    CGF.Builder.CreateStore(CGF.Builder.getInt32(1), DidIt);
+    CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, CGF.Builder.getInt32(1), DidIt);
   }
   Action.Done(CGF);
   // call __kmpc_copyprivate(ident_t *, gtid, <buf_size>, <copyprivate list>,
@@ -2447,7 +2447,7 @@ void CGOpenMPRuntime::emitSingleRegion(CodeGenFunction &CGF,
         CGF.CreateMemTemp(CopyprivateArrayTy, ".omp.copyprivate.cpr_list");
     for (unsigned I = 0, E = CopyprivateVars.size(); I < E; ++I) {
       Address Elem = CGF.Builder.CreateConstArrayGEP(CopyprivateList, I);
-      CGF.Builder.CreateStore(
+      CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, 
           CGF.Builder.CreatePointerBitCastOrAddrSpaceCast(
               CGF.EmitLValue(CopyprivateVars[I]).getPointer(CGF),
               CGF.VoidPtrTy),
@@ -2461,7 +2461,7 @@ void CGOpenMPRuntime::emitSingleRegion(CodeGenFunction &CGF,
     llvm::Value *BufSize = CGF.getTypeSize(CopyprivateArrayTy);
     Address CL = CGF.Builder.CreatePointerBitCastOrAddrSpaceCast(
         CopyprivateList, CGF.VoidPtrTy, CGF.Int8Ty);
-    llvm::Value *DidItVal = CGF.Builder.CreateLoad(DidIt);
+    llvm::Value *DidItVal = CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, DidIt);
     llvm::Value *Args[] = {
         emitUpdateLocation(CGF, Loc), // ident_t *<loc>
         getThreadID(CGF, Loc),        // i32 <gtid>
@@ -4673,7 +4673,7 @@ SmallVector<llvm::Value *, 4> CGOpenMPRuntime::emitDepobjElementsSizes(
       LValue NumLVal = CGF.MakeAddrLValue(
           CGF.CreateMemTemp(C.getUIntPtrType(), "depobj.size.addr"),
           C.getUIntPtrType());
-      CGF.Builder.CreateStore(llvm::ConstantInt::get(CGF.IntPtrTy, 0),
+      CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, llvm::ConstantInt::get(CGF.IntPtrTy, 0),
                               NumLVal.getAddress(CGF));
       llvm::Value *PrevVal = CGF.EmitLoadOfScalar(NumLVal, E->getExprLoc());
       llvm::Value *Add = CGF.Builder.CreateNUWAdd(PrevVal, NumDeps);
@@ -5345,11 +5345,11 @@ llvm::Function *CGOpenMPRuntime::emitReductionFunction(
   // Dst = (void*[n])(LHSArg);
   // Src = (void*[n])(RHSArg);
   Address LHS(CGF.Builder.CreatePointerBitCastOrAddrSpaceCast(
-                  CGF.Builder.CreateLoad(CGF.GetAddrOfLocalVar(&LHSArg)),
+                  CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, CGF.GetAddrOfLocalVar(&LHSArg)),
                   ArgsElemType->getPointerTo()),
               ArgsElemType, CGF.getPointerAlign());
   Address RHS(CGF.Builder.CreatePointerBitCastOrAddrSpaceCast(
-                  CGF.Builder.CreateLoad(CGF.GetAddrOfLocalVar(&RHSArg)),
+                  CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, CGF.GetAddrOfLocalVar(&RHSArg)),
                   ArgsElemType->getPointerTo()),
               ArgsElemType, CGF.getPointerAlign());
 
@@ -5371,7 +5371,7 @@ llvm::Function *CGOpenMPRuntime::emitReductionFunction(
       // Get array size and emit VLA type.
       ++Idx;
       Address Elem = CGF.Builder.CreateConstArrayGEP(LHS, Idx);
-      llvm::Value *Ptr = CGF.Builder.CreateLoad(Elem);
+      llvm::Value *Ptr = CGF.Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, Elem);
       const VariableArrayType *VLA =
           CGF.getContext().getAsVariableArrayType(PrivTy);
       const auto *OVE = cast<OpaqueValueExpr>(VLA->getSizeExpr());
@@ -5509,7 +5509,7 @@ void CGOpenMPRuntime::emitReduction(CodeGenFunction &CGF, SourceLocation Loc,
   unsigned Idx = 0;
   for (unsigned I = 0, E = RHSExprs.size(); I < E; ++I, ++IPriv, ++Idx) {
     Address Elem = CGF.Builder.CreateConstArrayGEP(ReductionList, Idx);
-    CGF.Builder.CreateStore(
+    CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, 
         CGF.Builder.CreatePointerBitCastOrAddrSpaceCast(
             CGF.EmitLValue(RHSExprs[I]).getPointer(CGF), CGF.VoidPtrTy),
         Elem);
@@ -5522,7 +5522,7 @@ void CGOpenMPRuntime::emitReduction(CodeGenFunction &CGF, SourceLocation Loc,
                  CGF.getContext().getAsVariableArrayType((*IPriv)->getType()))
               .NumElts,
           CGF.SizeTy, /*isSigned=*/false);
-      CGF.Builder.CreateStore(CGF.Builder.CreateIntToPtr(Size, CGF.VoidPtrTy),
+      CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, CGF.Builder.CreateIntToPtr(Size, CGF.VoidPtrTy),
                               Elem);
     }
   }
@@ -6102,7 +6102,7 @@ void CGOpenMPRuntime::emitTaskReductionFixups(CodeGenFunction &CGF,
     Address SizeAddr = getAddrOfArtificialThreadPrivate(
         CGF, CGM.getContext().getSizeType(),
         generateUniqueName(CGM, "reduction_size", RCG.getRefExpr(N)));
-    CGF.Builder.CreateStore(SizeVal, SizeAddr, /*IsVolatile=*/false);
+    CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, SizeVal, SizeAddr, /*IsVolatile=*/false);
   }
 }
 
@@ -9406,7 +9406,7 @@ static void emitNonContiguousDescriptor(
         llvm::ArrayType::get(CGM.VoidPtrTy, Info.NumberOfPtrs),
         Info.PointersArray, 0, I);
     Address PAddr(P, CGM.VoidPtrTy, CGF.getPointerAlign());
-    CGF.Builder.CreateStore(DAddr.getPointer(), PAddr);
+    CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, DAddr.getPointer(), PAddr);
     ++L;
   }
 }
@@ -9601,7 +9601,7 @@ static void emitOffloadingArrays(
           BP, BPVal->getType()->getPointerTo(/*AddrSpace=*/0));
       Address BPAddr(BP, BPVal->getType(),
                      Ctx.getTypeAlignInChars(Ctx.VoidPtrTy));
-      CGF.Builder.CreateStore(BPVal, BPAddr);
+      CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, BPVal, BPAddr);
 
       if (Info.requiresDevicePointerInfo())
         if (const ValueDecl *DevVD =
@@ -9615,7 +9615,7 @@ static void emitOffloadingArrays(
       P = CGF.Builder.CreatePointerBitCastOrAddrSpaceCast(
           P, PVal->getType()->getPointerTo(/*AddrSpace=*/0));
       Address PAddr(P, PVal->getType(), Ctx.getTypeAlignInChars(Ctx.VoidPtrTy));
-      CGF.Builder.CreateStore(PVal, PAddr);
+      CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, PVal, PAddr);
 
       if (RuntimeSizes.test(I)) {
         llvm::Value *S = CGF.Builder.CreateConstInBoundsGEP2_32(
@@ -9624,7 +9624,7 @@ static void emitOffloadingArrays(
             /*Idx0=*/0,
             /*Idx1=*/I);
         Address SAddr(S, CGM.Int64Ty, Ctx.getTypeAlignInChars(Int64Ty));
-        CGF.Builder.CreateStore(CGF.Builder.CreateIntCast(CombinedInfo.Sizes[I],
+        CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, CGF.Builder.CreateIntCast(CombinedInfo.Sizes[I],
                                                           CGM.Int64Ty,
                                                           /*isSigned=*/true),
                                 SAddr);
@@ -9639,7 +9639,7 @@ static void emitOffloadingArrays(
         Info.HasMapper = true;
       }
       Address MAddr = CGF.Builder.CreateConstArrayGEP(MappersArray, I);
-      CGF.Builder.CreateStore(MFunc, MAddr);
+      CGF.Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, MFunc, MAddr);
     }
   }
 

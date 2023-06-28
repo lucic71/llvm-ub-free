@@ -359,12 +359,12 @@ ComplexPairTy ComplexExprEmitter::EmitLoadOfLValue(LValue lvalue,
 
   if (!IgnoreReal || isVolatile) {
     Address RealP = CGF.emitAddrOfRealComponent(SrcPtr, lvalue.getType());
-    Real = Builder.CreateLoad(RealP, isVolatile, SrcPtr.getName() + ".real");
+    Real = Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, RealP, isVolatile, SrcPtr.getName() + ".real");
   }
 
   if (!IgnoreImag || isVolatile) {
     Address ImagP = CGF.emitAddrOfImagComponent(SrcPtr, lvalue.getType());
-    Imag = Builder.CreateLoad(ImagP, isVolatile, SrcPtr.getName() + ".imag");
+    Imag = Builder.CreateLoad(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, ImagP, isVolatile, SrcPtr.getName() + ".imag");
   }
 
   return ComplexPairTy(Real, Imag);
@@ -382,8 +382,8 @@ void ComplexExprEmitter::EmitStoreOfComplex(ComplexPairTy Val, LValue lvalue,
   Address RealPtr = CGF.emitAddrOfRealComponent(Ptr, lvalue.getType());
   Address ImagPtr = CGF.emitAddrOfImagComponent(Ptr, lvalue.getType());
 
-  Builder.CreateStore(Val.first, RealPtr, lvalue.isVolatileQualified());
-  Builder.CreateStore(Val.second, ImagPtr, lvalue.isVolatileQualified());
+  Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, Val.first, RealPtr, lvalue.isVolatileQualified());
+  Builder.CreateStore(!CGF.CGM.getCodeGenOpts().UseDefaultAlignment, Val.second, ImagPtr, lvalue.isVolatileQualified());
 }
 
 
