@@ -5125,6 +5125,8 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   if (!Args.hasFlag(options::OPT_fcheck_div_rem_overflow,
                    options::OPT_fno_check_div_rem_overflow, false))
     CmdArgs.push_back("-fno-check-div-rem-overflow");
+  else
+    CmdArgs.push_back("-fcheck-div-rem-overflow");
 
   if (!Args.hasFlag(options::OPT_fuse_default_alignment,
                    options::OPT_fno_use_default_alignment, true))

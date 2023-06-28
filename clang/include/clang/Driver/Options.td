@@ -1960,7 +1960,7 @@ defm drop_inbounds_from_gep : BoolFOption<"drop-inbounds-from-gep",
   PosFlag<SetTrue,  [CC1Option], "Drop inbounds from GEPs">>;
 
 defm check_div_rem_overflow : BoolFOption<"check-div-rem-overflow",
-  CodeGenOpts<"CheckDivRemOverflow">, DefaultTrue,
+  CodeGenOpts<"CheckDivRemOverflow">, DefaultFalse,
   NegFlag<SetFalse, [CC1Option], "Do not check div/rem ops for overflow (default)">,
   PosFlag<SetTrue,  [CC1Option], "Check div/rem ops for overflow">>;
 
