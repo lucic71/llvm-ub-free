@@ -1955,7 +1955,7 @@ defm constrain_bool_value : BoolFOption<"constrain-bool-value",
   PosFlag<SetTrue,  [CC1Option], "Constrain bool values to {0,1} (default)">>;
 
 defm drop_inbounds_from_gep : BoolFOption<"drop-inbounds-from-gep",
-  CodeGenOpts<"DropInboundsFromGEP">, DefaultTrue,
+  CodeGenOpts<"DropInboundsFromGEP">, DefaultFalse,
   NegFlag<SetFalse, [CC1Option], "Do not drop inbounds from GEPs (default)">,
   PosFlag<SetTrue,  [CC1Option], "Drop inbounds from GEPs">>;
 

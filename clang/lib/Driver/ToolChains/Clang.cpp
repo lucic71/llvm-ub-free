@@ -5121,6 +5121,8 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   if (!Args.hasFlag(options::OPT_fdrop_inbounds_from_gep,
                    options::OPT_fno_drop_inbounds_from_gep, false))
     CmdArgs.push_back("-fno-drop-inbounds-from-gep");
+  else
+    CmdArgs.push_back("-fdrop-inbounds-from-gep");
 
   if (!Args.hasFlag(options::OPT_fcheck_div_rem_overflow,
                    options::OPT_fno_check_div_rem_overflow, false))
