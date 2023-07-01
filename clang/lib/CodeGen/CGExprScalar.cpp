@@ -3305,7 +3305,7 @@ Value *ScalarExprEmitter::EmitDiv(const BinOpInfo &Ops) {
   }
   else if (Ops.isFixedPointOp()) {
     return EmitFixedPointBinOp(Ops);
-  } else if (Ops.Ty->isIntegerType()) {
+  } else if (Ops.Ty->hasUnsignedIntegerRepresentation()) {
     if (CGF.CGM.getCodeGenOpts().CheckDivRemOverflow) {
       llvm::Value *Zero = llvm::Constant::getNullValue(ConvertType(Ops.Ty));
       llvm::IntegerType *Ty = cast<llvm::IntegerType>(Zero->getType());
@@ -3330,16 +3330,34 @@ Value *ScalarExprEmitter::EmitDiv(const BinOpInfo &Ops) {
 
       Builder.SetInsertPoint(DivBB);
     }
-    llvm::Value *Div;
-    if (Ops.Ty->hasUnsignedIntegerRepresentation())
-      Div = Builder.CreateUDiv(Ops.LHS, Ops.RHS, "div");
-    else
-      Div = Builder.CreateSDiv(Ops.LHS, Ops.RHS, "div");
-    
-    return Div;
-  }
+    return Builder.CreateUDiv(Ops.LHS, Ops.RHS, "div");
+  } else {
+    if (CGF.CGM.getCodeGenOpts().CheckDivRemOverflow) {
+      llvm::Value *Zero = llvm::Constant::getNullValue(ConvertType(Ops.Ty));
+      llvm::IntegerType *Ty = cast<llvm::IntegerType>(Zero->getType());
+      llvm::Value *IntMin = Builder.getInt(llvm::APInt::getSignedMinValue(Ty->getBitWidth()));
+      llvm::Value *NegOne = llvm::Constant::getAllOnesValue(Ty);
+      
+      llvm::Value *RHSNotZero = Builder.CreateICmpEQ(Ops.RHS, Zero);
+      llvm::Value *LHSIsIntMin = Builder.CreateICmpEQ(Ops.LHS, IntMin);
+      llvm::Value *RHSIsNegOne = Builder.CreateICmpEQ(Ops.RHS, NegOne);
 
-  llvm_unreachable("Unknown operands for div");
+      llvm::Value *And = Builder.CreateAnd(LHSIsIntMin, RHSIsNegOne);
+      llvm::Value *Or = Builder.CreateOr(RHSNotZero, And);
+
+      llvm::BasicBlock *TrapBB = CGF.createBasicBlock("overflow.trap", CGF.CurFn);
+      llvm::BasicBlock *DivBB = CGF.createBasicBlock("nooverflow", CGF.CurFn, Builder.GetInsertBlock()->getNextNode());
+
+      Builder.CreateCondBr(Or, TrapBB, DivBB);
+
+      Builder.SetInsertPoint(TrapBB);
+      CGF.EmitTrapCall(llvm::Intrinsic::trap);
+      Builder.CreateUnreachable();
+
+      Builder.SetInsertPoint(DivBB);
+    }
+    return Builder.CreateSDiv(Ops.LHS, Ops.RHS, "div");
+  }
 }
 
 Value *ScalarExprEmitter::EmitRem(const BinOpInfo &Ops) {
