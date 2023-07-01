@@ -236,7 +236,7 @@ CodeGenFunction::GetAddressOfDirectBaseInCompleteClass(Address This,
   Address V = This;
   if (!Offset.isZero()) {
     V = Builder.CreateElementBitCast(V, Int8Ty);
-    V = CGM.getCodeGenOpts().DropInboundsFromGEP ? Builder.CreateConstByteGEP(V, Offset) : Builder.CreateConstByteGEP(V, Offset) ;
+    V = CGM.getCodeGenOpts().DropInboundsFromGEP ? Builder.CreateConstByteGEP(V, Offset) : Builder.CreateConstInBoundsByteGEP(V, Offset) ;
   }
   V = Builder.CreateElementBitCast(V, ConvertType(Base));
 
