@@ -1254,7 +1254,6 @@ AliasResult BasicAAResult::aliasGEP(
     // [ModOffset..ModOffset+V1Size) and [0..V2Size). If the first access fits
     // into the range [V2Size..GCD), then we know they cannot overlap.
     APInt ModOffset = DecompGEP1.Offset.srem(GCD);
-    ModOffset.dump(); GCD.dump();
     if (ModOffset.isNegative())
       ModOffset += GCD; // We want mod, not rem.
     if (ModOffset.uge(V2Size.getValue()) &&
@@ -1320,7 +1319,6 @@ AliasResult BasicAAResult::aliasGEP(
     }
 
     if (MinAbsVarIndex) {
-      MinAbsVarIndex->dump();
       // The constant offset will have added at least +/-MinAbsVarIndex to it.
       APInt OffsetLo = DecompGEP1.Offset - *MinAbsVarIndex;
       APInt OffsetHi = DecompGEP1.Offset + *MinAbsVarIndex;
