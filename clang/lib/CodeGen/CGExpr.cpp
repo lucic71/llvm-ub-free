@@ -1745,7 +1745,9 @@ llvm::Value *CodeGenFunction::EmitLoadOfScalar(Address Addr, bool Volatile,
                                                LValueBaseInfo BaseInfo,
                                                TBAAAccessInfo TBAAInfo,
                                                bool isNontemporal) {
-  Addr.withPointer(Addr.getPointer()->stripInBoundsOffsets());
+  /* Add a check for OpenMP. Clang crahes when we drop inbounds in OpenMP code. */
+  if (CGM.getCodeGenOpts().DropInboundsFromGEP)
+    Addr.withPointer(Addr.getPointer()->stripInBoundsOffsets());
   if (const auto *ClangVecTy = Ty->getAs<VectorType>()) {
     // Boolean vectors use `iN` as storage type.
     if (ClangVecTy->isExtVectorBoolType()) {
