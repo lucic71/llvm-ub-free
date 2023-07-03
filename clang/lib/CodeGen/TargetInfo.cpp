@@ -422,7 +422,7 @@ static Address complexTempStructure(CodeGenFunction &CGF, Address VAListAddr,
       ? CGF.Builder.CreateConstInBoundsByteGEP(ImagAddr, 2 * SlotSize - EltSize)
       : CGF.Builder.CreateConstInBoundsByteGEP(ImagAddr, 2 * SlotSize - EltSize);
   } else {
-    RealAddr = CGF.CGM.getCodeGenOpts().DropInboundsFromGEP
+    ImagAddr = CGF.CGM.getCodeGenOpts().DropInboundsFromGEP
         ? CGF.Builder.CreateConstByteGEP(RealAddr, SlotSize)
         : CGF.Builder.CreateConstInBoundsByteGEP(RealAddr, SlotSize);
   }
