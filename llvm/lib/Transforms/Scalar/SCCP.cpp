@@ -74,7 +74,7 @@ STATISTIC(
     IPNumInstReplaced,
     "Number of instructions replaced with (simpler) instruction by IPSCCP");
 
-cl::opt<bool> TrapOnUB("trap-on-ub", cl::init(false));
+cl::opt<bool> TrapOnUndefBr("trap-on-undef-br", cl::init(false));
 
 // Helper to check if \p LV is either a constant or a constant
 // range with a single element. This should cover exactly the same cases as the
@@ -405,7 +405,7 @@ static bool removeNonFeasibleEdges(const SCCPSolver &Solver, BasicBlock *BB,
     }
     TI->eraseFromParent();
     Instruction* unreachableInst = new UnreachableInst(BB->getContext(), BB);
-    if (TrapOnUB) {
+    if (TrapOnUndefBr) {
       Function *TrapFn =
          Intrinsic::getDeclaration(unreachableInst->getParent()->getParent()->getParent(), Intrinsic::trap);
       CallInst::Create(TrapFn, "", unreachableInst);
@@ -444,7 +444,8 @@ static bool removeNonFeasibleEdges(const SCCPSolver &Solver, BasicBlock *BB,
             BasicBlock::Create(DefaultDest->getContext(), "default.unreachable",
                                DefaultDest->getParent(), DefaultDest);
         Instruction* unreachableInst = new UnreachableInst(DefaultDest->getContext(), NewUnreachableBB);
-        if (TrapOnUB) {
+        /* TODO: when is this code triggered? The test suite does not cover this case */
+        if (TrapOnUndefBr) {
           Function *TrapFn =
              Intrinsic::getDeclaration(unreachableInst->getParent()->getParent()->getParent(), Intrinsic::trap);
           CallInst::Create(TrapFn, "", unreachableInst);
