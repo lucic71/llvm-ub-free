@@ -1,4 +1,4 @@
-; RUN: opt %s -loop-vectorize -force-vector-width=4 -force-vector-interleave=1 -S | FileCheck %s
+; RUN: opt -zero-uninit-loads %s -loop-vectorize -force-vector-width=4 -force-vector-interleave=1 -S | FileCheck %s
 
 ; Make sure that integer poison-generating flags (i.e., nuw/nsw, exact and inbounds)
 ; are dropped from instructions in blocks that need predication and are linearized
@@ -31,7 +31,7 @@ define void @drop_scalar_nuw_nsw(float* noalias nocapture readonly %input,
 ; CHECK-NEXT:    [[TMP7:%.*]] = xor <4 x i1> [[TMP4]], <i1 true, i1 true, i1 true, i1 true>
 ; CHECK-NEXT:    [[TMP8:%.*]] = getelementptr float, float* [[TMP6]], i32 0
 ; CHECK-NEXT:    [[TMP9:%.*]] = bitcast float* [[TMP8]] to <4 x float>*
-; CHECK-NEXT:    [[WIDE_MASKED_LOAD:%.*]] = call <4 x float> @llvm.masked.load.v4f32.p0v4f32(<4 x float>* [[TMP9]], i32 4, <4 x i1> [[TMP7]], <4 x float> poison), !invariant.load !0
+; CHECK-NEXT:    [[WIDE_MASKED_LOAD:%.*]] = call <4 x float> @llvm.masked.load.v4f32.p0v4f32(<4 x float>* [[TMP9]], i32 4, <4 x i1> [[TMP7]], <4 x float> zeroinitializer), !invariant.load !0
 entry:
   br label %loop.header
 
@@ -73,7 +73,7 @@ define void @drop_nonpred_scalar_nuw_nsw(float* noalias nocapture readonly %inpu
 ; CHECK-NEXT:    [[TMP7:%.*]] = xor <4 x i1> [[TMP4]], <i1 true, i1 true, i1 true, i1 true>
 ; CHECK-NEXT:    [[TMP8:%.*]] = getelementptr float, float* [[TMP6]], i32 0
 ; CHECK-NEXT:    [[TMP9:%.*]] = bitcast float* [[TMP8]] to <4 x float>*
-; CHECK-NEXT:    [[WIDE_MASKED_LOAD:%.*]] = call <4 x float> @llvm.masked.load.v4f32.p0v4f32(<4 x float>* [[TMP9]], i32 4, <4 x i1> [[TMP7]], <4 x float> poison), !invariant.load !0
+; CHECK-NEXT:    [[WIDE_MASKED_LOAD:%.*]] = call <4 x float> @llvm.masked.load.v4f32.p0v4f32(<4 x float>* [[TMP9]], i32 4, <4 x i1> [[TMP7]], <4 x float> zeroinitializer), !invariant.load !0
 entry:
   br label %loop.header
 
@@ -157,7 +157,7 @@ define void @drop_vector_nuw_nsw(float* noalias nocapture readonly %input,
 ; CHECK-NEXT:    [[TMP11:%.*]] = extractelement <4 x float*> [[TMP7]], i32 0
 ; CHECK-NEXT:    [[TMP12:%.*]] = getelementptr float, float* [[TMP11]], i32 0
 ; CHECK-NEXT:    [[TMP13:%.*]] = bitcast float* [[TMP12]] to <4 x float>*
-; CHECK-NEXT:    [[WIDE_MASKED_LOAD:%.*]] = call <4 x float> @llvm.masked.load.v4f32.p0v4f32(<4 x float>* [[TMP13]], i32 4, <4 x i1> [[TMP10]], <4 x float> poison), !invariant.load !0
+; CHECK-NEXT:    [[WIDE_MASKED_LOAD:%.*]] = call <4 x float> @llvm.masked.load.v4f32.p0v4f32(<4 x float>* [[TMP13]], i32 4, <4 x i1> [[TMP10]], <4 x float> zeroinitializer), !invariant.load !0
 entry:
   br label %loop.header
 
@@ -243,7 +243,7 @@ define void @drop_scalar_exact(float* noalias nocapture readonly %input,
 ; CHECK-NEXT:    [[TMP10:%.*]] = xor <4 x i1> [[TMP7]], <i1 true, i1 true, i1 true, i1 true>
 ; CHECK-NEXT:    [[TMP11:%.*]] = getelementptr float, float* [[TMP9]], i32 0
 ; CHECK-NEXT:    [[TMP12:%.*]] = bitcast float* [[TMP11]] to <4 x float>*
-; CHECK-NEXT:    [[WIDE_MASKED_LOAD:%.*]] = call <4 x float> @llvm.masked.load.v4f32.p0v4f32(<4 x float>* [[TMP12]], i32 4, <4 x i1> [[TMP10]], <4 x float> poison), !invariant.load !0
+; CHECK-NEXT:    [[WIDE_MASKED_LOAD:%.*]] = call <4 x float> @llvm.masked.load.v4f32.p0v4f32(<4 x float>* [[TMP12]], i32 4, <4 x i1> [[TMP10]], <4 x float> zeroinitializer), !invariant.load !0
 entry:
   br label %loop.header
 
