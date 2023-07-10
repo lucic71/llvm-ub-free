@@ -20,7 +20,7 @@ int no_return() {
   // CHECK-NOSTRICT-NEXT: ret i32
   // CHECK-NOSTRICT-NEXT: }
 
-  // CHECK-NOSTRICT-OPT: ret i32 undef
+  // CHECK-NOSTRICT-OPT: ret i32 0
 }
 
 enum Enum {
