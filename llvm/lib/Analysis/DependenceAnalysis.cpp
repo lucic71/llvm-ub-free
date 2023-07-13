@@ -3552,9 +3552,11 @@ DependenceInfo::depends(Instruction *Src, Instruction *Dst,
   case AliasResult::MayAlias:
   case AliasResult::PartialAlias:
     // cannot analyse objects if we don't understand their aliasing.
+    LLVM_DEBUG(dbgs() << "can't analyze may or partial alias\n");
     return std::make_unique<Dependence>(Src, Dst);
   case AliasResult::NoAlias:
     // If the objects noalias, they are distinct, accesses are independent.
+    LLVM_DEBUG(dbgs() << "no alias\n");
     if (!DisableObjectBasedAnalysis) {
       return nullptr;
     } else {
