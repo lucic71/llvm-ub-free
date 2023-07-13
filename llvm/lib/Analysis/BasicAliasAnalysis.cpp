@@ -67,6 +67,7 @@ using namespace llvm;
 static cl::opt<bool> EnableRecPhiAnalysis("basic-aa-recphi", cl::Hidden,
                                           cl::init(true));
 static cl::opt<bool> DisableOOBAnalysis("disable-oob-analysis", cl::init(false));
+cl::opt<bool> DisableObjectBasedAnalysis("disable-object-based-analysis", cl::init(false));
 
 /// SearchLimitReached / SearchTimes shows how often the limit of
 /// to decompose GEPs is reached. It will affect the precision
@@ -1573,7 +1574,7 @@ AliasResult BasicAAResult::aliasCheck(const Value *V1, LocationSize V1Size,
     if (!NullPointerIsDefined(&F, CPN->getType()->getAddressSpace()))
       return AliasResult::NoAlias;
 
-  if (O1 != O2) {
+  if (!DisableObjectBasedAnalysis && O1 != O2) {
     // If V1/V2 point to two different objects, we know that we have no alias.
     if (isIdentifiedObject(O1) && isIdentifiedObject(O2))
       return AliasResult::NoAlias;

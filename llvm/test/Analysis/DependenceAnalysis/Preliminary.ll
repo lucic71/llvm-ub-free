@@ -1,5 +1,7 @@
 ; RUN: opt < %s -disable-output "-passes=print<da>" -aa-pipeline=basic-aa 2>&1 \
 ; RUN: | FileCheck %s
+; RUN: opt < %s -disable-output -disable-object-based-analysis "-passes=print<da>" -aa-pipeline=basic-aa 2>&1 \
+; RUN: | FileCheck %s --check-prefixes=CHECK-DISABLED
 
 target datalayout = "e-p:64:64:64-i1:8:8-i8:8:8-i16:16:16-i32:32:32-i64:64:64-f32:32:32-f64:64:64-v64:64:64-v128:128:128-a0:0:64-s0:64:64-f80:128:128-n8:16:32:64-S128"
 target triple = "x86_64-apple-macosx10.6.0"
@@ -36,6 +38,11 @@ entry:
 ; CHECK: da analyze - none!
 ; CHECK: da analyze - none!
 ; CHECK: da analyze - none!
+
+; CHECK-DISABLED-LABEL: p1
+; CHECK-DISABLED: da analyze - none!
+; CHECK-DISABLED: da analyze - confused!
+; CHECK-DISABLED: da analyze - none!
 
   %arrayidx1 = getelementptr inbounds i32, i32* %B, i64 1
   %0 = load i32, i32* %arrayidx1, align 4

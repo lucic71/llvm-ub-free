@@ -55,6 +55,8 @@ STATISTIC(NumIndirectGlobalVars, "Number of indirect global objects");
 static cl::opt<bool> EnableUnsafeGlobalsModRefAliasResults(
     "enable-unsafe-globalsmodref-alias-results", cl::init(false), cl::Hidden);
 
+extern cl::opt<bool> DisableObjectBasedAnalysis;
+
 /// The mod/ref information collected for a particular function.
 ///
 /// We collect information about mod/ref behavior of a function here, both in
@@ -837,19 +839,19 @@ AliasResult GlobalsAAResult::alias(const MemoryLocation &LocA,
 
     // If the two pointers are derived from two different non-addr-taken
     // globals we know these can't alias.
-    if (GV1 && GV2 && GV1 != GV2)
+    if (!DisableObjectBasedAnalysis && GV1 && GV2 && GV1 != GV2)
       return AliasResult::NoAlias;
 
     // If one is and the other isn't, it isn't strictly safe but we can fake
     // this result if necessary for performance. This does not appear to be
     // a common problem in practice.
     if (EnableUnsafeGlobalsModRefAliasResults)
-      if ((GV1 || GV2) && GV1 != GV2)
+      if (!DisableObjectBasedAnalysis && (GV1 || GV2) && GV1 != GV2)
         return AliasResult::NoAlias;
 
     // Check for a special case where a non-escaping global can be used to
     // conclude no-alias.
-    if ((GV1 || GV2) && GV1 != GV2) {
+    if (!DisableObjectBasedAnalysis && (GV1 || GV2) && GV1 != GV2) {
       const GlobalValue *GV = GV1 ? GV1 : GV2;
       const Value *UV = GV1 ? UV2 : UV1;
       if (isNonEscapingGlobalNoAlias(GV, UV))
@@ -883,14 +885,14 @@ AliasResult GlobalsAAResult::alias(const MemoryLocation &LocA,
   // Now that we know whether the two pointers are related to indirect globals,
   // use this to disambiguate the pointers. If the pointers are based on
   // different indirect globals they cannot alias.
-  if (GV1 && GV2 && GV1 != GV2)
+  if (!DisableObjectBasedAnalysis && GV1 && GV2 && GV1 != GV2)
     return AliasResult::NoAlias;
 
   // If one is based on an indirect global and the other isn't, it isn't
   // strictly safe but we can fake this result if necessary for performance.
   // This does not appear to be a common problem in practice.
   if (EnableUnsafeGlobalsModRefAliasResults)
-    if ((GV1 || GV2) && GV1 != GV2)
+    if (!DisableObjectBasedAnalysis && (GV1 || GV2) && GV1 != GV2)
       return AliasResult::NoAlias;
 
   return AAResultBase::alias(LocA, LocB, AAQI);

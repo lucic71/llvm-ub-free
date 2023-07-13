@@ -105,6 +105,8 @@ STATISTIC(BanerjeeApplications, "Banerjee applications");
 STATISTIC(BanerjeeIndependence, "Banerjee independence");
 STATISTIC(BanerjeeSuccesses, "Banerjee successes");
 
+extern cl::opt<bool> DisableObjectBasedAnalysis;
+
 static cl::opt<bool>
     Delinearize("da-delinearize", cl::init(true), cl::Hidden,
                 cl::desc("Try to delinearize array references."));
@@ -3550,12 +3552,14 @@ DependenceInfo::depends(Instruction *Src, Instruction *Dst,
   case AliasResult::MayAlias:
   case AliasResult::PartialAlias:
     // cannot analyse objects if we don't understand their aliasing.
-    LLVM_DEBUG(dbgs() << "can't analyze may or partial alias\n");
     return std::make_unique<Dependence>(Src, Dst);
   case AliasResult::NoAlias:
     // If the objects noalias, they are distinct, accesses are independent.
-    LLVM_DEBUG(dbgs() << "no alias\n");
-    return nullptr;
+    if (!DisableObjectBasedAnalysis) {
+      return nullptr;
+    } else {
+      return std::make_unique<Dependence>(Src, Dst);
+    }
   case AliasResult::MustAlias:
     break; // The underlying objects alias; test accesses for dependence.
   }
