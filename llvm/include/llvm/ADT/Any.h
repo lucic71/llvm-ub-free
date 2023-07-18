@@ -125,7 +125,6 @@ private:
 template <typename T> const char Any::TypeId<T>::Id = 0;
 
 template <typename T>
-LLVM_DEPRECATED("Use any_cast(Any*) != nullptr instead", "any_cast")
 bool any_isa(const Any &Value) {
   return Value.isa<T>();
 }
